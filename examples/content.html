@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nihon-tidy デモ</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 15px/1.6 system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 16px 0; }
+  button, input[type=file] { font: inherit; }
+  #status { opacity: .7; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>nihon-tidy デモ</h1>
+  <p>CSV・JSONファイルを選ぶと、ブラウザの中だけで正規化して表示します（データは外部に送信されません）。</p>
+  <div class="bar">
+    <input type="file" id="file" accept=".csv,.tsv,.txt,.json">
+    <button id="sample">サンプルを読み込む</button>
+    <button id="report" disabled>分析レポートを開く</button>
+    <span id="status"></span>
+  </div>
+  <div id="app"></div>
+</main>
+
+<script type="module">
+  // npm公開後は 'https://cdn.jsdelivr.net/npm/nihon-tidy/+esm' から読み込める
+  import { tidy } from '../src/index.js';
+
+  let result;
+  const status = document.getElementById('status');
+  const reportBtn = document.getElementById('report');
+
+  async function load(input) {
+    result = await tidy(input);
+    result.render('#app');
+    const applied = result.changes.filter((c) => c.applied).length;
+    status.textContent = `${applied}件を正規化、要確認 ${result.issues.length}件（文字コード：${result.meta.encoding ?? '-'}）`;
+    reportBtn.disabled = false;
+  }
+
+  document.getElementById('file').addEventListener('change', (e) => e.target.files[0] && load(e.target.files[0]));
+  document.getElementById('sample').addEventListener('click', async () => {
+    const res = await fetch('./sample-sjis.csv');
+    const blob = await res.blob();
+    load(Object.assign(blob, { name: 'sample-sjis.csv' }));
+  });
+  reportBtn.addEventListener('click', () => {
+    const url = URL.createObjectURL(new Blob([result.toReport()], { type: 'text/html' }));
+    window.open(url, '_blank');
+  });
+</script>
+</body>
+</html>
