@@ -134,6 +134,8 @@ export interface PlainResult {
 export interface ViewController {
   refresh(): void;
   setView(view: 'table' | 'cards'): void;
+  /** 表示を消して、スクロールの監視などを止める */
+  destroy(): void;
 }
 
 export interface RenderOptions {

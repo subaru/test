@@ -120,7 +120,7 @@ Worker が使えない場合は、メインスレッドで `tidy` を呼びま�
 
 ### 数万行の表示
 
-表は、行数が `threshold`（既定 500）を超えると**仮想スクロール**に切り替わります。見えている行と前後の数十行だけを描くので、数万行でも軽く動きます（例：5万行の表の最初の表示が、すべて描く場合の約11秒から約0.1秒に）。見出しは上に固定され、列の幅は先頭の行から決めるのでスクロールしても変わりません。表の高さは `height`（既定 480px、`<tidy-table height="600">`）。`virtual: false` で常にすべて描き、`virtual: true` で行数に関係なく仮想スクロールにします。
+表は、行数が `threshold`（既定 500）を超えると**仮想スクロール**に切り替わります。見えている行と前後の数十行だけを描くので、数万行でも軽く動きます（例：5万行の表の最初の表示が、すべて描く場合の約2〜11秒（環境による）から約0.1秒に）。見出しは上に固定され、列の幅は全体のデータから一度だけ決めるので、スクロール・並べ替え・検索で変わりません（幅に収まらないセルは「…」で切り、全文を `title` に出します）。検索で件数が減っても、全体の行数で仮想スクロールにしたまま表示します。行の高さは1行目に合わせるので、セルを折り返すCSS（`white-space: normal`）とは併用しないでください。表の高さは `height`（既定 480px、`<tidy-table height="600">`）。`virtual: false` で常にすべて描き、`virtual: true` で行数に関係なく仮想スクロールにします。
 
 カード表示は `batch`（既定 200）枚ずつ描き、下までスクロールすると次を足します。行数が多いときの検索は、入力が止まってから行います。
 
@@ -264,7 +264,7 @@ result.toJSON()
 result.toPlain()      // その時点の写し（素のオブジェクト）。保存したものは hydrate(plain) で操作を付け直せる（hydrate は配列をコピーせず共有する）
 result.toTableHTML() / result.toCardsHTML({ titleColumn: '顧客名' }) // 文字列のHTML（サーバー側で使う場合）
 result.render(el, { view: 'table', placeholder: '検索', style: false }) // style: false で既定のCSSを入れない
-result.render(el, { virtual: 'auto', height: 480, threshold: 500, batch: 200 }) // 数万行の表示（下記）
+result.render(el, { virtual: 'auto', height: 480, threshold: 500, batch: 200 }) // 数万行の表示（下記）。戻り値の destroy() で表示を消す
 
 // 修正（Node.jsでも使える）。fix・accept・setCanonical は変更ログに残る
 result.fix(row, '登録日', '2024-04-02') // 任意の値に直す

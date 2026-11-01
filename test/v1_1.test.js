@@ -79,3 +79,8 @@ test('Excel: 以前のサンプル（1段の見出し・本文の縦の結合）
   assert.equal(t.meta.headerRows, 1);
   assert.deepEqual(t.rows.map((r) => r[0]), ['関東', '関東', '関東', '関西', '関西']);
 });
+
+test('toTableHTML の出力は v1.0 と同じ（読み上げ用の行番号は仮想スクロールの表だけ）', async () => {
+  const r = await tidy('名前\n山田\n');
+  assert.equal(r.toTableHTML(), '<table class="tidy-table"><thead><tr><th data-type="text" tabindex="0">名前</th></tr></thead><tbody><tr><td class="t-text">山田</td></tr></tbody></table>');
+});

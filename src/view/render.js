@@ -9,22 +9,25 @@ export function format(v, type) {
   return String(v);
 }
 
-const headHTML = (schema) => `<tr aria-rowindex="1">${schema.map((c) => `<th data-type="${escape(c.type)}" tabindex="0">${escape(c.name)}</th>`).join('')}</tr>`;
+const headHTML = (schema, virtual = true) => `<tr${virtual ? ' aria-rowindex="1"' : ''}>${schema.map((c) => `<th data-type="${escape(c.type)}" tabindex="0">${escape(c.name)}</th>`).join('')}</tr>`;
 
-// 1行分の HTML。i は表示している行の中での番号（読み上げ用の行番号に使う）
-function rowHTML(schema, r, i, withTitle = false) {
-  const cells = schema.map((c) => {
-    const text = escape(format(r[c.name], c.type));
-    return `<td class="t-${escape(c.type)}"${withTitle && text.length > 20 ? ` title="${text}"` : ''}>${text}</td>`;
+// 1行分の HTML。仮想スクロールでは i（表示している行の中での番号）を読み上げ用の行番号にし、
+// 列の幅（widths、em）に収まらないセルには title で全文を付ける
+function rowHTML(schema, r, i, widths) {
+  const cells = schema.map((c, k) => {
+    const raw = format(r[c.name], c.type);
+    const text = escape(raw);
+    const cut = widths && raw && estimateEm(raw) > widths[k] - 1.2;
+    return `<td class="t-${escape(c.type)}"${cut ? ` title="${text}"` : ''}>${text}</td>`;
   });
-  return `<tr aria-rowindex="${i + 2}">${cells.join('')}</tr>`;
+  return `<tr${widths ? ` aria-rowindex="${i + 2}"` : ''}>${cells.join('')}</tr>`;
 }
 
 // サーバー側やビルド時にも使える、文字列だけを返す版（全行を出力する）
 export function toTableHTML(result) {
   const { schema, data } = result;
   const body = data.map((r, i) => rowHTML(schema, r, i)).join('\n');
-  return `<table class="tidy-table"><thead>${headHTML(schema)}</thead><tbody>${body}</tbody></table>`;
+  return `<table class="tidy-table"><thead>${headHTML(schema, false)}</thead><tbody>${body}</tbody></table>`;
 }
 
 // カードの見出しにする列：指定がなければ最初のテキスト列
@@ -71,6 +74,7 @@ function columnWidths(schema, rows) {
     return Math.min(28, Math.max(4, w * 0.55 + 1.6));
   });
 }
+const estimateEm = (s) => displayWidth(s) * 0.55;
 
 export const STYLE = `
 .tidy-view { font: 14px/1.5 system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; }
@@ -94,7 +98,7 @@ export const STYLE = `
 .tidy-card dd { margin: 0; overflow-wrap: anywhere; }
 .tidy-view .tidy-count { font-size: 12px; opacity: .7; margin-top: 6px; }
 .tidy-view .tidy-virtual { overflow: auto; border: 1px solid #8884; border-radius: 6px; }
-.tidy-view .tidy-virtual .tidy-table { table-layout: fixed; width: max-content; min-width: 100%; }
+.tidy-view .tidy-virtual .tidy-table { table-layout: fixed; }
 .tidy-view .tidy-virtual td { overflow: hidden; text-overflow: ellipsis; }
 .tidy-view .tidy-virtual thead th { position: sticky; top: 0; z-index: 1; background: Canvas; }
 .tidy-view .tidy-spacer td { padding: 0; border: 0; }
@@ -144,6 +148,7 @@ export function render(el, result, options = {}) {
   const body = document.createElement('div');
   const count = document.createElement('div');
   count.className = 'tidy-count';
+  count.setAttribute('aria-live', 'polite');
   root.append(bar, body, count);
   target.append(root);
 
@@ -176,21 +181,46 @@ export function render(el, result, options = {}) {
   };
 
   let observer = null;
+  let timer;
   const cleanup = () => {
+    clearTimeout(timer);
     body.onscroll = null;
     body.style.maxHeight = '';
+    body.style.overflow = '';
+    for (const a of ['role', 'aria-label', 'tabindex']) body.removeAttribute(a);
     observer?.disconnect();
     observer = null;
   };
 
+  // 列の幅は全体のデータから一度だけ決める（並べ替え・検索で幅が変わらないように。値が直されたら決め直す）
+  let widths = null;
+  // 検索用の文字列は行ごとに一度だけ作る（値が直されたら作り直す）
+  let haystack = new WeakMap();
+  const textOf = (r) => {
+    let t = haystack.get(r);
+    if (t === undefined) {
+      t = schema.map((c) => format(r[c.name], c.type)).join('\u0000').normalize('NFKC').toLowerCase();
+      haystack.set(r, t);
+    }
+    return t;
+  };
+  const h = Number(options.height);
+  const height = Number.isFinite(h) && h > 0 ? h : 480;
+
   // 仮想スクロールの表：見えている範囲の行だけを描き、上下は高さだけの行で埋める
   const drawVirtual = (visible, scrollTop) => {
-    const height = options.height ?? 480;
-    const widths = columnWidths(schema, visible);
+    widths ??= columnWidths(schema, result.data);
+    const total = widths.reduce((a, b) => a + b, 0);
     const colgroup = `<colgroup>${widths.map((w) => `<col style="width:${w.toFixed(1)}em">`).join('')}</colgroup>`;
     body.className = 'tidy-scroll tidy-virtual';
+    // 既定のCSSを入れない（style: false）ときも内側でスクロールするよう、必要なものはその場で付ける
     body.style.maxHeight = `${height}px`;
-    body.innerHTML = `<table class="tidy-table" aria-rowcount="${visible.length + 1}">${colgroup}<thead>${headHTML(schema)}</thead><tbody></tbody></table>`;
+    body.style.overflow = 'auto';
+    body.setAttribute('role', 'region');
+    body.setAttribute('aria-label', '表（スクロールで続きを表示）');
+    body.tabIndex = 0;
+    // 幅を明示しないと、描いている行の内容で表の幅が変わってしまう
+    body.innerHTML = `<table class="tidy-table" style="width:max(100%, ${total.toFixed(1)}em)" aria-rowcount="${visible.length + 1}">${colgroup}<thead>${headHTML(schema)}</thead><tbody></tbody></table>`;
     wireHeader();
     const tbody = body.querySelector('tbody');
     const spacer = (h) => (h > 0 ? `<tr class="tidy-spacer" aria-hidden="true"><td colspan="${schema.length}" style="height:${h}px"></td></tr>` : '');
@@ -204,7 +234,7 @@ export function render(el, result, options = {}) {
       if (first === range[0] && last === range[1]) return;
       range = [first, last];
       let html = spacer(first * rowH);
-      for (let i = first; i < last; i++) html += rowHTML(schema, visible[i], i, true);
+      for (let i = first; i < last; i++) html += rowHTML(schema, visible[i], i, widths);
       tbody.innerHTML = html + spacer((visible.length - last) * rowH);
       // 実際の行の高さを測り、見積もりと違えば描き直す（フォントや余白の違いに合わせる）
       const tr = tbody.querySelector('tr[aria-rowindex]');
@@ -229,9 +259,10 @@ export function render(el, result, options = {}) {
   };
 
   // カード：batch 枚ずつ描き、下まで見えたら次を足す
-  const drawCards = (visible) => {
-    const batch = options.batch ?? 200;
-    let shown = Math.min(batch, visible.length);
+  let shown = 0;
+  const drawCards = (visible, keep) => {
+    const batch = Math.max(1, options.batch ?? 200);
+    shown = Math.min(Math.max(batch, keep ? shown : 0), visible.length);
     body.className = '';
     body.innerHTML = `<div class="tidy-cards">${cardsHTML({ schema, data: visible.slice(0, shown) }, options)}</div>`;
     if (shown >= visible.length) return;
@@ -248,7 +279,12 @@ export function render(el, result, options = {}) {
       if (shown >= visible.length) {
         more.remove();
         observer?.disconnect();
-      } else label();
+      } else {
+        label();
+        // ボタンが見えたままなら、もう一度知らせてもらう
+        observer?.unobserve(more);
+        observer?.observe(more);
+      }
     };
     more.addEventListener('click', next);
     body.append(more);
@@ -259,19 +295,21 @@ export function render(el, result, options = {}) {
   };
 
   const draw = ({ keepScroll = false } = {}) => {
-    const q = search.value.trim().normalize('NFKC').toLowerCase();
-    const visible = q
-      ? rows.filter((r) => schema.some((c) => format(r[c.name], c.type).normalize('NFKC').toLowerCase().includes(q)))
-      : rows;
-    sorter.hidden = view !== 'cards';
     // 描き直す前の位置（cleanup で高さの制限を外すと位置が 0 に戻るので、先に覚えておく）
     const scrollTop = keepScroll ? body.scrollTop : 0;
+    const pageY = keepScroll ? window.scrollY : null;
     cleanup();
+    if (!root.isConnected) return; // 外で消された表示は描かない
+    const q = search.value.trim().normalize('NFKC').toLowerCase();
+    const visible = q ? rows.filter((r) => textOf(r).includes(q)) : rows;
+    sorter.hidden = view !== 'cards';
 
+    // 仮想にするかは全体の行数で決める（検索で件数が減っても見た目を変えない）
     const mode = options.virtual ?? 'auto';
-    const virtual = mode === true || (mode === 'auto' && visible.length > (options.threshold ?? 500));
+    const virtual = mode === true || (mode === 'auto' && rows.length > (options.threshold ?? 500));
     if (view === 'cards') {
-      drawCards(visible);
+      drawCards(visible, keepScroll);
+      if (pageY !== null) window.scrollTo(window.scrollX, pageY);
     } else if (virtual) {
       drawVirtual(visible, scrollTop);
     } else {
@@ -283,7 +321,6 @@ export function render(el, result, options = {}) {
   };
 
   // 行数が多いときは、入力が止まってから検索する
-  let timer;
   search.addEventListener('input', () => {
     clearTimeout(timer);
     if (rows.length > 5000) timer = setTimeout(() => draw(), 200);
@@ -299,12 +336,19 @@ export function render(el, result, options = {}) {
   return {
     // 値が直されたら、並べ替えをやり直してから描き直す
     refresh() {
+      widths = null;
+      haystack = new WeakMap();
       sortBy(sortKey, sortDir);
       draw({ keepScroll: true });
     },
     setView(v) {
       view = v;
       draw();
+    },
+    // 表示を消して、スクロールの監視などを止める
+    destroy() {
+      cleanup();
+      root.remove();
     },
   };
 }
