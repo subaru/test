@@ -19,15 +19,24 @@ const CORP_WORDS = new RegExp(`(${[...new Set(CORP.map(([, w]) => w))].join('|')
 
 const expandCorp = (s) => CORP.reduce((acc, [abbr, full]) => acc.split(abbr).join(full), s);
 
+const SEPARATORS = /[\s・･.,、。'"`\-‐−ー_/()「」『』]/g;
+
 export function fingerprint(value) {
-  return expandCorp(String(value))
-    .toLowerCase()
-    .replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))
-    .replace(/[\s・･.,、。'"`\-_/()「」『』]/g, '');
+  return (
+    expandCorp(String(value))
+      .toLowerCase()
+      .replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))
+      // 数字と数字の間の区切りは意味を持つ（「1-23」と「12-3」、「1.5」と「15」は別物）ので「#」として残す
+      .replace(/(?<=\d)\s*[.,\-‐−ー/・]\s*(?=\d)/g, '#')
+      .replace(SEPARATORS, '')
+  );
 }
 
+// 法人格を取り除いた指紋。法人格の種類は残すので「(有)ABC」と「(株)ABC」はまとめない
 export function looseFingerprint(value) {
-  return fingerprint(value).replace(CORP_WORDS, '');
+  const fp = fingerprint(value);
+  const kinds = [...new Set(fp.match(CORP_WORDS) ?? [])].sort().join('+');
+  return kinds ? `${kinds}|${fp.replace(CORP_WORDS, '')}` : '';
 }
 
 // 代表の表記：最も多いもの → 略称を含まないもの → 先に出てきたもの
@@ -68,19 +77,30 @@ export function cluster(result, options = {}) {
       return counts;
     };
 
+    // 値 → 行番号の索引（まとまりごとに全行を走査すると件数の2乗の時間がかかるため）
+    let rowsByValue;
+    const indexRows = () => {
+      rowsByValue = new Map();
+      data.forEach((r, row) => {
+        const v = r[col.name];
+        if (!rowsByValue.has(v)) rowsByValue.set(v, []);
+        rowsByValue.get(v).push(row);
+      });
+    };
+
     const apply = (variants, confidence) => {
       const canonical = pickCanonical(variants);
       const applied = confidence >= minConfidence;
-      const members = new Set(variants.map((v) => v.value));
       const note = `表記ゆれを「${canonical}」に統一（${variants.length}種類）`;
       const entry = { column: col.name, canonical, variants: variants.map(({ value, count }) => ({ value, count })), confidence, applied, rows: [] };
       clusters.push(entry);
 
-      data.forEach((r, row) => {
+      const rows = variants.flatMap((v) => rowsByValue.get(v.value) ?? []).sort((a, b) => a - b);
+      for (const row of rows) {
+        const r = data[row];
         const value = r[col.name];
-        if (!members.has(value)) return;
         entry.rows.push(row);
-        if (value === canonical) return;
+        if (value === canonical) continue;
         // 同じセルに記録済みの変更があれば、元の値を引き継いで1件にまとめる
         const prev = changeAt.get(cellKey(row, col.name)) ?? -1;
         const before = prev >= 0 ? changes[prev].before : value;
@@ -89,11 +109,13 @@ export function cluster(result, options = {}) {
         else changeAt.set(cellKey(row, col.name), changes.push(change) - 1);
         if (applied) r[col.name] = canonical;
         else result.issues.push({ row, column: col.name, value, reason: `表記ゆれの可能性（提案: ${canonical}）`, suggestion: canonical });
-      });
+      }
     };
 
+    indexRows();
     for (const g of group(countValues(), fingerprint)) apply(g, 1);
-    // 厳密に統一した後の値で、法人格を除いた緩い指紋でもう一度まとめる（提案のみ）
+    // 厳密に統一した後の値で、法人格の位置を無視した緩い指紋でもう一度まとめる（提案のみ）
+    indexRows();
     for (const g of group(countValues(), looseFingerprint)) apply(g, 0.6);
   }
 

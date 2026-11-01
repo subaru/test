@@ -121,7 +121,7 @@ ${schema.map((c) => columnCard(c, changes, issues)).join('\n')}
 ${
   changes.length
     ? `<div class="filters">
-  <select id="f-col"><option value="">すべての列</option>${schema.map((c) => `<option>${escape(c.name)}</option>`).join('')}</select>
+  <select id="f-col"><option value="">すべての列</option>${schema.map((c) => `<option value="${escape(c.name)}">${escape(c.name)}</option>`).join('')}</select>
   <select id="f-rule"><option value="">すべての規則</option>${rules.map((r) => `<option value="${escape(r)}">${escape(ruleLabel(r))}</option>`).join('')}</select>
 </div>
 <div class="scroll"><table id="changes">

@@ -3,16 +3,24 @@ import { parseCSV } from './csv.js';
 import { isZip } from './zip.js';
 import { readXLSX } from './xlsx.js';
 
-// 入力（文字列 / バイト列 / File・Blob / オブジェクト配列）を表 { columns, rows, meta } に揃える。
-// rows は文字列の二次元配列。
+// 入力（文字列 / バイト列 / File・Blob / オブジェクト配列）を表 { columns, rows, meta, warnings } に揃える。
+// rows は文字列の二次元配列。warnings は読み込み時に気づいた問題（要確認に加える）。
 export async function read(input, options = {}) {
+  const table = await readTable(input, options);
+  table.columns = uniqueColumns(table.columns);
+  table.warnings ??= [];
+  return table;
+}
+
+async function readTable(input, options) {
   const meta = { source: options.format ?? null, encoding: null };
 
+  if (input === null || input === undefined) throw new TypeError('入力がありません（文字列・ファイル・バイト列・配列を渡してください）');
   if (Array.isArray(input)) return fromRecords(input, { ...meta, source: 'records' });
 
   let text;
   if (typeof input === 'string') {
-    text = input;
+    text = input.replace(/^\ufeff/, '');
   } else {
     let bytes = input;
     if (typeof input?.arrayBuffer === 'function') {
@@ -36,16 +44,55 @@ export async function read(input, options = {}) {
   meta.source = format;
 
   if (format === 'json') {
-    const data = JSON.parse(text);
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (error) {
+      // 拡張子や指定がなく先頭が [ { なだけなら、CSVとして読み直す（「[メモ],金額」など）
+      if (options.format === 'json' || /\.json$/i.test(meta.name ?? '')) throw new Error(`JSONとして読み込めません：${error.message}`);
+      return readCSV(text, options, { ...meta, source: 'csv' });
+    }
     return fromRecords(Array.isArray(data) ? data : [data], meta);
   }
 
+  return readCSV(text, options, meta);
+}
+
+function readCSV(text, options, meta) {
   const { rows, delimiter } = parseCSV(text, options.delimiter);
   meta.delimiter = delimiter;
+  if (!rows.length) return { columns: [], rows: [], meta, warnings: [] };
+
   const header = options.header ?? true;
-  const columns = header ? rows.shift().map((h, i) => h.trim() || `列${i + 1}`) : rows[0].map((_, i) => `列${i + 1}`);
-  const width = columns.length;
-  return { columns, rows: rows.map((r) => pad(r, width)), meta };
+  const columns = header ? rows.shift().map((h) => cleanHeader(h)) : [];
+  // 見出しより多いセルは捨てずに列を足し、要確認に挙げる（区切り文字の誤りに気づけるように）
+  const width = Math.max(columns.length, ...rows.map((r) => r.length));
+  const named = columns.length;
+  for (let i = 0; i < width; i++) columns[i] ||= `列${i + 1}`;
+  const warnings = [];
+  rows.forEach((r, ri) => {
+    if (!header || r.length <= named) return;
+    const extra = r.slice(named).filter((v) => v.trim() !== '');
+    if (extra.length) {
+      warnings.push({ row: ri, column: columns[named], value: extra.join(meta.delimiter), reason: `見出し（${named}列）より多いセルがあります。引用符で囲まれていない区切り文字の可能性` });
+    }
+  });
+  return { columns, rows: rows.map((r) => pad(r, width)), meta, warnings };
+}
+
+const cleanHeader = (h) => String(h).replace(/[\u200b-\u200d\u2060\ufeff]/g, '').trim();
+
+// 重複した列名は「名前_2」のように番号を付ける（同じ名前だと片方のデータが消えるため）
+export function uniqueColumns(columns) {
+  const seen = new Set();
+  return columns.map((c, i) => {
+    let name = cleanHeader(c) || `列${i + 1}`;
+    if (name === '__proto__') name = '__proto___';
+    const base = name;
+    for (let n = 2; seen.has(name); n++) name = `${base}_${n}`;
+    seen.add(name);
+    return name;
+  });
 }
 
 function guessFormat(text, name = '') {
@@ -62,16 +109,23 @@ function fromRecords(records, meta) {
   return { columns, rows, meta };
 }
 
+// 配列はそのまま文字列にする（数字の配列を連結して1つの数にしないよう、区切りを明示する）
+function scalar(v) {
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().replace(/T00:00:00\.000Z$/, '');
+  if (Array.isArray(v)) return v.some((x) => x !== null && typeof x === 'object') ? JSON.stringify(v) : v.join(' / ');
+  return v;
+}
+
 // { user: { name: 'a' } } → { 'user.name': 'a' }
 function flatten(obj, prefix = '', out = {}) {
-  if (obj === null || typeof obj !== 'object') {
-    out[prefix || 'value'] = obj;
+  if (obj === null || typeof obj !== 'object' || obj instanceof Date || Array.isArray(obj)) {
+    out[prefix || 'value'] = scalar(obj);
     return out;
   }
   for (const [k, v] of Object.entries(obj)) {
     const key = prefix ? `${prefix}.${k}` : k;
-    if (v !== null && typeof v === 'object' && !Array.isArray(v)) flatten(v, key, out);
-    else out[key] = Array.isArray(v) ? v.join(', ') : v;
+    if (v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) flatten(v, key, out);
+    else out[key] = scalar(v);
   }
   return out;
 }

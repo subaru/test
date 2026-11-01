@@ -33,10 +33,13 @@ test('日付: 8桁とExcelシリアル値は列名のヒントがある場合だ
 
 test('電話番号', () => {
   assert.equal(norm('phone', '０３（１２３４）５６７８'), '03-1234-5678');
-  assert.equal(norm('phone', '09012345678'), '090-1234-5678');
+  // 数字だけの値は、列名のヒントがなければ電話番号とみなさない（IDの場合がある）
+  assert.equal(norm('phone', '09012345678'), null);
+  assert.equal(norm('phone', '09012345678', { hinted: true }), '090-1234-5678');
+  assert.equal(ruleByType.phone.normalize('09012345678', { typed: true }).confidence, 0.8);
   assert.equal(norm('phone', '+81 6-1234-5678'), '06-1234-5678');
   assert.equal(norm('phone', 'TEL:0120-123-456'), '0120-123-456');
-  assert.equal(ruleByType.phone.normalize('0451234567').confidence, 0.6);
+  assert.equal(ruleByType.phone.normalize('0451234567', { hinted: true }).confidence, 0.6);
   assert.equal(norm('phone', '12345'), null);
 });
 

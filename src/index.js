@@ -16,6 +16,7 @@ export async function tidy(input, options = {}) {
   const table = await read(input, options);
   const schema = detect(table, options);
   const { data, changes, issues } = normalize(table, schema, options);
+  issues.unshift(...table.warnings);
   const result = { data, schema, changes, issues, meta: table.meta };
   result.clusters = cluster(result, options);
 
@@ -30,19 +31,25 @@ export async function tidy(input, options = {}) {
     toTableHTML: () => toTableHTML(result),
     toCardsHTML: (opts) => toCardsHTML(result, opts),
     toJSON: () => data,
-    toCSV: () => toCSV(result),
+    toCSV: (opts) => toCSV(result, opts),
     render: (el, opts) => render(el, result, opts),
     renderReview: (el, opts) => renderReview(el, api, opts),
   };
   return api;
 }
 
-function toCSV({ schema, data }) {
+// CSVに書き出す。
+//   bom: true    … Excelで文字化けしないよう先頭にBOMを付ける
+//   safe: false  … 数式インジェクション対策（= + - @ などで始まる文字列の先頭に ' を付ける）を外す
+export function toCSV({ schema, data }, options = {}) {
+  const safe = options.safe ?? true;
   const q = (v) => {
-    const s = v === null || v === undefined ? '' : String(v);
+    let s = v === null || v === undefined ? '' : String(v);
+    // 数値そのもの（-500 など）は対象外。文字列として = + - @ タブ・改行で始まるものだけ
+    if (safe && typeof v !== 'number' && /^[=+\-@\t\r]/.test(s) && !/^[+-]?\d[\d,]*(\.\d+)?$/.test(s)) s = `'${s}`;
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [schema.map((c) => q(c.name)).join(',')];
   for (const r of data) lines.push(schema.map((c) => q(r[c.name])).join(','));
-  return lines.join('\r\n') + '\r\n';
+  return (options.bom ? '\ufeff' : '') + lines.join('\r\n') + '\r\n';
 }

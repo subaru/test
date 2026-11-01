@@ -29,31 +29,37 @@ function download(name, text, type) {
 
 export function renderReview(el, result, options = {}) {
   const host = typeof el === 'string' ? document.querySelector(el) : el;
+  if (!host) throw new Error(`表示先の要素が見つかりません：${el}`);
   // 呼び直してもイベントが重複しないよう、毎回新しい要素に描画する
   const target = document.createElement('div');
   host.replaceChildren(target);
   const onChange = options.onChange ?? (() => {});
+  // 入力途中の値（描き直しても消えないように、行と列で覚えておく）
+  const drafts = new Map();
+  const cellKey = (row, column) => `${row}\t${column}`;
 
   const draw = () => {
     const issues = result.issues;
     const pending = result.changes.filter((c) => !c.applied && !c.dismissed).length;
     const clusters = result.clusters ?? [];
 
+    // ボタンは配列の番号ではなく「行と列」で対象を指す（他から修正されて配列がずれても取り違えない）
     const issueItems = issues
-      .map(
-        (i, k) => `<li data-k="${k}">
+      .map((i) => {
+        const where = `${i.row + 1}行目の${escape(i.column)}`;
+        const draft = drafts.get(cellKey(i.row, i.column)) ?? i.suggestion ?? i.value;
+        return `<li data-row="${i.row}" data-col="${escape(i.column)}">
   <span class="where">${i.row + 1}行目・${escape(i.column)}</span>
   <span class="orig">${escape(i.value === '' ? '（空）' : i.value)}</span> →
-  <input value="${escape(i.suggestion ?? i.value)}" aria-label="${i.row + 1}行目の${escape(i.column)}の修正後の値">
-  ${i.suggestion !== undefined ? '<button data-act="accept">提案を適用</button>' : ''}
-  <button data-act="fix">この値にする</button>
-  <button data-act="dismiss">そのまま</button>
+  <input value="${escape(draft)}" aria-label="${where}の修正後の値">
+  ${i.suggestion !== undefined ? `<button data-act="accept" aria-label="${where}：提案を適用">提案を適用</button>` : ''}
+  <button data-act="fix" aria-label="${where}：入力した値にする">この値にする</button>
+  <button data-act="dismiss" aria-label="${where}：今の値のままにする">そのまま</button>
   <span class="reason">${escape(i.reason)}</span>
-</li>`,
-      )
+</li>`;
+      })
       .join('');
 
-    // 提案を個別に適用して揃った場合も「統一済み」とみなす
     const unified = (c) => c.applied || c.rows.every((r) => result.data[r][c.column] === c.canonical);
     const clusterItems = clusters
       .map(
@@ -70,33 +76,58 @@ export function renderReview(el, result, options = {}) {
 
     target.innerHTML = `<style>${REVIEW_STYLE}</style><section class="tidy-review">
   <div class="tidy-head">
-    <h3>要確認 ${issues.length}件</h3>
+    <h3 aria-live="polite">要確認 ${issues.length}件</h3>
     ${pending ? `<button class="primary" data-act="accept-all">提案をすべて適用（${pending}件）</button>` : ''}
     <button data-act="csv">CSVで保存</button>
     <button data-act="json">JSONで保存</button>
   </div>
-  ${issues.length ? `<ul>${issueItems}</ul>` : '<p class="done">要確認の項目はありません。</p>'}
+  ${issues.length ? `<ul class="tidy-issues">${issueItems}</ul>` : '<p class="done">要確認の項目はありません。</p>'}
   ${clusters.length ? `<h4>表記ゆれ ${clusters.length}組</h4><ul>${clusterItems}</ul>` : ''}
 </section>`;
   };
+
+  // 操作した項目と同じ位置にある次の項目へフォーカスを移す（キーボード操作で迷子にならないように）
+  const restoreFocus = (position) => {
+    const items = target.querySelectorAll('.tidy-issues > li');
+    const next = items[Math.min(position, items.length - 1)];
+    (next?.querySelector('button') ?? target.querySelector('button'))?.focus();
+  };
+
+  const commit = (position) => {
+    draw();
+    if (position !== undefined) restoreFocus(position);
+    onChange(result);
+  };
+
+  target.addEventListener('input', (e) => {
+    const li = e.target.closest('li[data-row]');
+    if (li) drafts.set(cellKey(+li.dataset.row, li.dataset.col), e.target.value);
+  });
 
   target.addEventListener('click', (e) => {
     const act = e.target.dataset?.act;
     if (!act) return;
     const li = e.target.closest('li');
-    if (act === 'csv') return download('tidy.csv', '﻿' + result.toCSV(), 'text/csv');
+    if (act === 'csv') return download('tidy.csv', result.toCSV({ bom: true }), 'text/csv');
     if (act === 'json') return download('tidy.json', JSON.stringify(result.data, null, 2), 'application/json');
-    if (act === 'accept-all') result.acceptAll();
-    else if (li?.dataset.k !== undefined) {
-      const issue = result.issues[+li.dataset.k];
-      if (act === 'accept') result.accept(issue.row, issue.column);
-      if (act === 'fix') result.fix(issue.row, issue.column, li.querySelector('input').value);
-      if (act === 'dismiss') result.dismiss(issue.row, issue.column);
-    } else if (li?.dataset.c !== undefined && act === 'merge') {
-      result.setCanonical(+li.dataset.c, li.querySelector('select').value);
+    if (act === 'accept-all') {
+      result.acceptAll();
+      return commit(0);
     }
-    draw();
-    onChange(result);
+    if (li?.dataset.row !== undefined) {
+      const row = +li.dataset.row;
+      const column = li.dataset.col;
+      const position = [...li.parentElement.children].indexOf(li);
+      if (act === 'accept') result.accept(row, column);
+      if (act === 'fix') result.fix(row, column, li.querySelector('input').value);
+      if (act === 'dismiss') result.dismiss(row, column);
+      drafts.delete(cellKey(row, column));
+      return commit(position);
+    }
+    if (li?.dataset.c !== undefined && act === 'merge') {
+      result.setCanonical(+li.dataset.c, li.querySelector('select').value);
+      commit();
+    }
   });
 
   // 統一済みのまとまりは、選択を変えたらすぐ揃え直す
@@ -104,8 +135,7 @@ export function renderReview(el, result, options = {}) {
     const li = e.target.closest('li[data-c]');
     if (!li || e.target.tagName !== 'SELECT' || !result.clusters[+li.dataset.c].applied) return;
     result.setCanonical(+li.dataset.c, e.target.value);
-    draw();
-    onChange(result);
+    commit();
   });
 
   draw();

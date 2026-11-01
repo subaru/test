@@ -13,7 +13,7 @@ function split(d) {
   return [null, 0];
 }
 
-function parse(v) {
+function parse(v, ctx = {}) {
   let s = v.replace(HYPHENS, '-');
   if (!ALLOWED.test(s)) return null;
   s = s.replace(/^(?:TEL|Tel|tel|電話|携帯)?[:：]?\s*/, '');
@@ -21,6 +21,12 @@ function parse(v) {
   let digits = s.replace(/\D/g, '');
   if (s.startsWith('+81')) digits = '0' + digits.slice(2);
   if (!/^0\d{9,10}$/.test(digits)) return null;
+
+  // 数字だけの値はIDなどの場合があるので、列名が電話番号らしい場合だけ。
+  // 電話番号と判定済みの列の中なら、提案として扱う
+  const bare = /^\d+$/.test(s) && !ctx.hinted;
+  if (bare && !ctx.typed) return null;
+  const cap = (r) => (bare ? { ...r, confidence: Math.min(r.confidence, 0.8), note: `${r.note}（数字だけの値のため提案）` } : r);
 
   // 元の値に区切りがあれば、その区切り方を尊重する
   const groups = s.replace(/^\+81\s*/, '0').split(/[^\d]+/).filter(Boolean);
@@ -32,17 +38,17 @@ function parse(v) {
   if (!sizes) return null;
   let i = 0;
   const value = sizes.map((n) => digits.slice(i, (i += n))).join('-');
-  return {
+  return cap({
     value,
     confidence,
     note: confidence < 1 ? '市外局番の桁数を推測して区切った' : '電話番号にハイフンを補った',
-  };
+  });
 }
 
 export default {
   type: 'phone',
   label: '電話番号',
-  hint: /電話|tel|phone|携帯|fax/i,
-  match: (v) => parse(v) !== null,
+  hint: /電話|^tel|tel$|phone|携帯|fax/i,
+  match: (v, ctx) => parse(v, ctx) !== null,
   normalize: parse,
 };

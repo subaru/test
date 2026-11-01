@@ -39,8 +39,10 @@ export function parseCSV(text, delimiter = sniffDelimiter(text)) {
       } else {
         field += c;
       }
-    } else if (c === '"' && field === '') {
+    } else if (c === '"' && field.trim() === '') {
+      // 区切り文字の後の空白に続く引用符も、引用の始まりとして扱う
       quoted = true;
+      field = '';
     } else if (c === delimiter) {
       row.push(field);
       field = '';

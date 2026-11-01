@@ -40,7 +40,7 @@ test('共有文字列: ふりがな（rPh）を除き、リッチテキストを
 
 test('書式: 組み込み・和暦・独自の日付書式を判定する', () => {
   const xml = '<styleSheet><numFmts><numFmt numFmtId="164" formatCode="[$-ja-JP]ggge&quot;年&quot;m&quot;月&quot;d&quot;日&quot;"/><numFmt numFmtId="165" formatCode="#,##0&quot;円&quot;"/></numFmts><cellXfs><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="164"/><xf numFmtId="165"/></cellXfs></styleSheet>';
-  assert.deepEqual(parseDateStyles(xml), [false, true, true, false]);
+  assert.deepEqual(parseDateStyles(xml), [null, 'date', 'date', null]);
 });
 
 test('旧形式の.xlsは分かりやすいエラーにする', async () => {

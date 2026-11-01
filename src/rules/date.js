@@ -1,15 +1,17 @@
 import { HYPHENS } from './common.js';
 
-// 元号の開始年（西暦）
+// 元号の期間（西暦）。範囲外の日付（「令和元年4月1日」など）は提案にとどめる
 const ERAS = {
-  明治: 1868, M: 1868,
-  大正: 1912, T: 1912,
-  昭和: 1926, S: 1926,
-  平成: 1989, H: 1989,
-  令和: 2019, R: 2019,
+  明治: { year: 1868, from: '1868-01-25', to: '1912-07-29' },
+  大正: { year: 1912, from: '1912-07-30', to: '1926-12-24' },
+  昭和: { year: 1926, from: '1926-12-25', to: '1989-01-07' },
+  平成: { year: 1989, from: '1989-01-08', to: '2019-04-30' },
+  令和: { year: 2019, from: '2019-05-01', to: '9999-12-31' },
 };
+const ABBR = { M: '明治', T: '大正', S: '昭和', H: '平成', R: '令和' };
 
-const WESTERN = /^(\d{4})\s*[/.\-年]\s*(\d{1,2})\s*[/.\-月]\s*(\d{1,2})\s*日?$/;
+const TIME = '(?:[ T](\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?';
+const WESTERN = new RegExp(`^(\\d{4})\\s*[/.\\-年]\\s*(\\d{1,2})\\s*[/.\\-月]\\s*(\\d{1,2})\\s*日?${TIME}$`);
 const WAREKI = /^(明治|大正|昭和|平成|令和|[MTSHR])\s*(元|\d{1,2})\s*[/.\-年]\s*(\d{1,2})\s*[/.\-月]\s*(\d{1,2})\s*日?$/i;
 const COMPACT = /^(\d{4})(\d{2})(\d{2})$/;
 const SERIAL = /^\d{5}$/;
@@ -26,14 +28,24 @@ function parse(v, ctx = {}) {
 
   if ((m = s.match(WESTERN))) {
     const iso = toISO(+m[1], +m[2], +m[3]);
-    return iso && { value: iso, confidence: 1, note: '西暦の表記を統一' };
+    if (!iso) return null;
+    if (m[4] === undefined) return { value: iso, confidence: 1, note: '西暦の表記を統一' };
+    if (+m[4] > 23 || +m[5] > 59 || +(m[6] ?? 0) > 59) return null;
+    const time = `${m[4].padStart(2, '0')}:${m[5]}${m[6] ? `:${m[6]}` : ''}`;
+    return { value: `${iso} ${time}`, confidence: 1, note: '日時の表記を統一' };
   }
 
   if ((m = s.match(WAREKI))) {
-    const start = ERAS[m[1].length === 1 ? m[1].toUpperCase() : m[1]];
+    const name = m[1].length === 1 ? ABBR[m[1].toUpperCase()] : m[1];
+    const era = ERAS[name];
     const n = m[2] === '元' ? 1 : +m[2];
-    const iso = toISO(start + n - 1, +m[3], +m[4]);
-    return iso && { value: iso, confidence: 1, note: `和暦（${m[1]}）を西暦に変換` };
+    if (n < 1) return null;
+    const iso = toISO(era.year + n - 1, +m[3], +m[4]);
+    if (!iso) return null;
+    if (iso < era.from || iso > era.to) {
+      return { value: iso, confidence: 0.6, note: `${name}${m[2]}年${+m[3]}月${+m[4]}日は${name}の期間外のため提案にとどめる` };
+    }
+    return { value: iso, confidence: 1, note: `和暦（${name}）を西暦に変換` };
   }
 
   // 区切りのない8桁・Excelのシリアル値は、数値と紛らわしいので列名に「日付」らしさがある場合だけ
@@ -59,7 +71,8 @@ function parse(v, ctx = {}) {
 export default {
   type: 'date',
   label: '日付',
-  hint: /日|date|年月|期限|誕生/i,
+  // 「日数」「日当」「日額」は日付ではないので、「日」で終わる列名だけを対象にする
+  hint: /date|日付|日時|年月|期限|期日|誕生|(?:^|[^数当額])日$/i,
   match: (v, ctx) => parse(v, ctx) !== null,
   normalize: parse,
 };

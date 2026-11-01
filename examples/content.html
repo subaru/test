@@ -30,16 +30,26 @@
 </main>
 
 <script type="module">
-  // npm公開後は 'https://cdn.jsdelivr.net/npm/nihon-tidy/+esm' から読み込める
+  // npm公開後は import { tidy } from 'https://cdn.jsdelivr.net/npm/nihon-tidy/+esm' に置き換えられる
   import { tidy } from '../src/index.js';
 
   let result, controller;
+  let loading = 0; // 遅い読み込みが、後から選んだファイルの結果を上書きしないように
   const view = document.getElementById('view');
   const status = document.getElementById('status');
   const reportBtn = document.getElementById('report');
 
   async function load(input) {
-    result = await tidy(input);
+    const ticket = ++loading;
+    let next;
+    try {
+      next = await tidy(input);
+    } catch (error) {
+      if (ticket === loading) status.textContent = `読み込めませんでした：${error.message}`;
+      return;
+    }
+    if (ticket !== loading) return;
+    result = next;
     controller = result.render('#app', { view: view.value });
     // 要確認を直すと、表示も変更ログもその場で更新される
     result.renderReview('#review', { onChange: () => { controller.refresh(); showStatus(); } });
@@ -54,15 +64,17 @@
 
   document.getElementById('file').addEventListener('change', (e) => e.target.files[0] && load(e.target.files[0]));
   const loadSample = async (name) => {
-    const blob = await (await fetch(`./${name}`)).blob();
-    load(Object.assign(blob, { name }));
+    const res = await fetch(`./${name}`);
+    if (!res.ok) return (status.textContent = `${name} を読み込めません（${res.status}）`);
+    load(Object.assign(await res.blob(), { name }));
   };
   document.getElementById('sample').addEventListener('click', () => loadSample('sample-sjis.csv'));
   document.getElementById('sample-xlsx').addEventListener('click', () => loadSample('sample.xlsx'));
   view.addEventListener('change', () => controller?.setView(view.value));
   reportBtn.addEventListener('click', () => {
     const url = URL.createObjectURL(new Blob([result.toReport()], { type: 'text/html' }));
-    window.open(url, '_blank');
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
 </script>
 </body>

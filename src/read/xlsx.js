@@ -20,22 +20,35 @@ const attr = (tag, name) => tag.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1];
 // <t> を連結した文字列。日本語版Excelが付けるふりがな（<rPh>）は除く。
 function textOf(xml) {
   const body = xml.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '');
-  return decodeXML([...body.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((m) => m[1]).join(''));
+  return decodeXML([...body.matchAll(/<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g)].map((m) => m[1] ?? '').join(''));
 }
 
+// 空の文字列は <si/> と書かれる。これを飛ばすと以降の番号がずれるので必ず1件として数える
 export function parseSharedStrings(xml) {
-  return [...xml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => textOf(m[1]));
+  return [...xml.matchAll(/<si\b[^>]*?(?:\/>|>([\s\S]*?)<\/si>)/g)].map((m) => textOf(m[1] ?? ''));
 }
 
-// 日付として表示する書式番号（組み込み：14-22、日本語ロケールの27-36・50-58）
-const BUILTIN_DATES = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 50, 51, 52, 53, 54, 55, 56, 57, 58]);
+// 日付として表示する書式番号（組み込み：14-17・22、日本語ロケールの27-36・50-58）
+const BUILTIN_DATES = new Set([14, 15, 16, 17, 22, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 50, 51, 52, 53, 54, 55, 56, 57, 58]);
 
-function isDateFormat(code) {
-  const s = code.replace(/"[^"]*"/g, '').replace(/\[[^\]]*\]/g, '').replace(/\\./g, '');
-  return !/E[+-]/i.test(s) && /[ymdge]/i.test(s);
+// 書式の種類：'date'（日付・日時）/ 'time'（時刻・経過時間）/ null（数値など）
+export function formatKind(code) {
+  // 引用符の文字列・[色]や[$-ロケール]・エスケープ・「General」を除いてから記号を見る
+  const s = code
+    .replace(/"[^"]*"/g, '')
+    .replace(/\[([hms]+)\]/gi, '$1')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/\\./g, '')
+    .replace(/general|AM\/PM|A\/P/gi, '');
+  if (/E[+-]/i.test(s)) return null;
+  if (/[ydge]/i.test(s) || /m/i.test(s.replace(/[hs]+:?m+|m+:?s+/gi, ''))) return 'date';
+  if (/[hs]/i.test(s)) return 'time';
+  return null;
 }
 
-// スタイル番号 → 日付書式かどうか
+const BUILTIN_TIMES = new Set([18, 19, 20, 21, 45, 46, 47]);
+
+// スタイル番号 → 'date' / 'time' / null
 export function parseDateStyles(xml) {
   if (!xml) return [];
   const custom = new Map(
@@ -44,7 +57,8 @@ export function parseDateStyles(xml) {
   const xfs = xml.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)?.[1] ?? '';
   return [...xfs.matchAll(/<xf\b[^>]*>/g)].map((m) => {
     const id = +attr(m[0], 'numFmtId');
-    return BUILTIN_DATES.has(id) || (custom.has(id) && isDateFormat(custom.get(id)));
+    if (custom.has(id)) return formatKind(custom.get(id));
+    return BUILTIN_DATES.has(id) ? 'date' : BUILTIN_TIMES.has(id) ? 'time' : null;
   });
 }
 
@@ -54,20 +68,33 @@ function colIndex(ref) {
   return n - 1;
 }
 
-function serialToISO(n) {
-  const ms = Math.round((n - 25569) * 86400000); // 25569 = 1970-01-01
-  const iso = new Date(ms).toISOString();
-  return Number.isInteger(n) ? iso.slice(0, 10) : `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// シリアル値を日付・日時・時刻の文字列に。1900年基準ではExcelが存在しない1900-02-29を数えている
+export function serialToISO(n, kind = 'date', date1904 = false) {
+  if (!Number.isFinite(n)) return null;
+  const ms = Math.round(((n % 1) + (n < 0 ? 1 : 0)) * 86400) * 1000;
+  const time = `${pad2(Math.floor(ms / 3600000) % 24)}:${pad2(Math.floor(ms / 60000) % 60)}`;
+  if (kind === 'time' || (n >= 0 && n < 1)) return time;
+  const days = Math.floor(n) + (date1904 ? 1462 : n < 60 ? 1 : 0);
+  const date = new Date(Date.UTC(1899, 11, 30) + days * 86400000).toISOString().slice(0, 10);
+  return ms ? `${date} ${time}` : date;
 }
 
-export function parseSheet(xml, shared, dateStyles) {
+export function parseSheet(xml, shared, dateStyles, date1904 = false) {
   const grid = [];
   let merged = 0;
+  let nextRow = 0;
 
   for (const row of xml.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
-    const r = +attr(row[1], 'r') - 1;
+    // r 属性は省略できるので、なければ直前の行の次とみなす
+    const r = attr(row[1], 'r') ? +attr(row[1], 'r') - 1 : nextRow;
+    nextRow = r + 1;
+    let nextCol = 0;
     for (const c of (row[2] ?? '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const ref = attr(c[1], 'r');
+      const col = ref ? colIndex(ref) : nextCol;
+      nextCol = col + 1;
       const type = attr(c[1], 't');
       const style = +(attr(c[1], 's') ?? 0);
       const inner = c[2] ?? '';
@@ -78,9 +105,10 @@ export function parseSheet(xml, shared, dateStyles) {
       else if (type === 'str') value = decodeXML(v ?? '');
       else if (type === 'b') value = v === '1' ? 'TRUE' : 'FALSE';
       else if (type === 'e') value = '';
-      else if (v !== undefined) value = dateStyles[style] ? serialToISO(+v) : v;
+      else if (type === 'd') value = (v ?? '').replace('T', ' ').replace(/ 00:00:00(\.0+)?Z?$/, '').replace(/(:\d\d)(\.\d+)?Z?$/, '$1');
+      else if (v !== undefined) value = (dateStyles[style] && serialToISO(+v, dateStyles[style], date1904)) || decodeXML(v);
       if (value === '') continue;
-      (grid[r] ??= [])[colIndex(ref)] = value;
+      (grid[r] ??= [])[col] = value;
     }
   }
 
@@ -102,7 +130,9 @@ export function parseSheet(xml, shared, dateStyles) {
 
 // 見出し行を探す：空行と、結合したタイトル行（値が1種類しかない行）を飛ばす
 function findHeader(rows) {
-  const width = Math.max(1, ...rows.map((r) => r.filter((v) => v !== '').length));
+  let width = 1;
+  for (const r of rows) width = Math.max(width, r.filter((v) => v !== '').length);
+  if (width === 1) return rows.findIndex((r) => r.some((v) => v !== '')); // 1列だけの表
   return rows.findIndex((r) => {
     const vals = r.filter((v) => v !== '');
     return vals.length >= Math.max(2, width * 0.5) && new Set(vals).size > 1;
@@ -129,15 +159,17 @@ export async function readXLSX(u8, options = {}) {
 
   const shared = parseSharedStrings((await text('xl/sharedStrings.xml')) ?? '');
   const dateStyles = parseDateStyles(await text('xl/styles.xml'));
-  const { rows, merged } = parseSheet(await text(sheet.path), shared, dateStyles);
+  const date1904 = /<workbookPr\b[^>]*\bdate1904="(1|true)"/.test(workbook);
+  const { rows, merged } = parseSheet((await text(sheet.path)) ?? '', shared, dateStyles, date1904);
 
   const h = options.header === false ? -1 : (options.headerRow ?? findHeader(rows));
-  const columns = h >= 0 ? rows[h].map((v, i) => v.trim() || `列${i + 1}`) : (rows[0] ?? []).map((_, i) => `列${i + 1}`);
+  const width = rows[0]?.length ?? 0;
+  const columns = h >= 0 ? rows[h].map((v, i) => v.trim() || `列${i + 1}`) : Array.from({ length: width }, (_, i) => `列${i + 1}`);
   const body = rows.slice(h + 1).filter((r) => r.some((v) => v !== ''));
 
   return {
     columns,
     rows: body,
-    meta: { source: 'xlsx', sheet: sheet.name, sheets: sheets.map((s) => s.name), merged, headerRow: h + 1 },
+    meta: { source: 'xlsx', sheet: sheet.name, sheets: sheets.map((s) => s.name), merged, headerRow: h + 1, date1904 },
   };
 }

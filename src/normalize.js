@@ -1,4 +1,4 @@
-import { clean } from './rules/common.js';
+import { clean, PLACEHOLDERS } from './rules/common.js';
 import { ruleByType } from './rules/index.js';
 
 // 推論した種類に従ってセルを正規化し、すべての変更を記録する。
@@ -16,12 +16,19 @@ export function normalize(table, schema, options = {}) {
       const rule = ruleByType[col.type];
       let value = base === '' ? null : base;
 
-      if (base !== raw && base !== '') {
-        changes.push({ row: ri, column: col.name, before: raw, after: base, rule: 'common', note: '全角・半角や空白を統一', confidence: 1, applied: true });
+      if (base !== raw) {
+        const note = base === '' ? '空白だけのセルを空に' : '全角・半角や空白を統一';
+        changes.push({ row: ri, column: col.name, before: raw, after: value, rule: 'common', note, confidence: 1, applied: true });
       }
 
-      if (rule && base !== '') {
-        const r = rule.normalize(base, { hinted: col.hinted || col.forced });
+      // 型のある列の「-」「N/A」などは、値がないことを表す記号として空にする
+      if (rule && PLACEHOLDERS.has(base)) {
+        const last = changes.at(-1);
+        if (last && last.row === ri && last.column === col.name) changes.pop();
+        changes.push({ row: ri, column: col.name, before: raw, after: null, rule: 'common', note: '値がないことを表す記号を空に', confidence: 1, applied: true });
+        value = null;
+      } else if (rule && base !== '') {
+        const r = rule.normalize(base, { hinted: col.hinted || col.forced, typed: true });
         if (!r) {
           issues.push({ row: ri, column: col.name, value: raw, reason: `${col.label}として解釈できません` });
         } else if (String(r.value) !== base) {
