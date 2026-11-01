@@ -1,5 +1,5 @@
 import { clean, PLACEHOLDERS } from './rules/common.js';
-import { defaultRuleSet, TEXT } from './rules/index.js';
+import { stageRuleSet, TEXT } from './rules/index.js';
 
 // 列ごとに全件を検査し、種類と確信度（一致した割合）を推論する。
 export function detect(table, options = {}) {
@@ -7,7 +7,7 @@ export function detect(table, options = {}) {
   // 列名が種類を示している場合（「生年月日」など）は基準を下げる
   const hintedThreshold = options.hintedThreshold ?? 0.5;
   const overrides = options.columns ?? {};
-  const { list: rules, byType: ruleByType } = options.ruleSet ?? defaultRuleSet;
+  const { list: rules, byType: ruleByType } = stageRuleSet(options);
 
   return table.columns.map((name, ci) => {
     const values = table.rows.map((r) => clean(r[ci])).filter((v) => v !== '' && !PLACEHOLDERS.has(v));
@@ -20,6 +20,10 @@ export function detect(table, options = {}) {
 
     const forced = overrides[name]?.type;
     if (forced) {
+      if (forced !== 'text' && !ruleByType[forced]) {
+        const hint = forced === 'address' ? "（住所は plugins: ['address'] が必要です）" : '';
+        throw new Error(`列「${name}」に指定した種類「${forced}」はありません${hint}`);
+      }
       const rule = ruleByType[forced] ?? TEXT;
       return { ...stats, type: rule.type, label: rule.label, confidence: 1, hinted: true, forced: true, candidates: [] };
     }

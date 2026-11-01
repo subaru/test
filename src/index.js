@@ -6,7 +6,7 @@ import { cluster } from './cluster.js';
 import { fix, accept, dismiss, acceptAll, setCanonical } from './fix.js';
 import { render, toTableHTML, toCardsHTML } from './view/render.js';
 import { renderReview } from './view/review.js';
-import { ruleSet } from './rules/index.js';
+import { ruleSet, checkPlugins, pluginRules } from './rules/index.js';
 
 export { read, detect, normalize, cluster, toReport, render, renderReview, toTableHTML, toCardsHTML };
 export { fingerprint } from './cluster.js';
@@ -18,16 +18,15 @@ const BUILTIN_PLUGINS = {
   address: () => import('./plugins/address.js'),
 };
 
-async function resolvePlugins(plugins = []) {
+// プラグインの指定を規則の配列にする。名前の指定は組み込みのプラグインを読み込む
+async function resolvePlugins(plugins) {
   const out = [];
-  for (const p of plugins) {
+  for (const p of checkPlugins(plugins)) {
     if (typeof p === 'string') {
       if (!BUILTIN_PLUGINS[p]) throw new Error(`不明なプラグインです：${p}（${Object.keys(BUILTIN_PLUGINS).join('、')}）`);
-      out.push((await BUILTIN_PLUGINS[p]()).default());
-    } else if (p && Array.isArray(p.rules)) {
-      out.push(p);
+      out.push(...pluginRules((await BUILTIN_PLUGINS[p]()).default()));
     } else {
-      throw new TypeError('プラグインは名前（"address" など）か { name, rules } のオブジェクトで指定してください');
+      out.push(...pluginRules(p));
     }
   }
   return out;
@@ -35,8 +34,8 @@ async function resolvePlugins(plugins = []) {
 
 // 読み込み → 列の種類の推論 → 正規化 → 表記ゆれの統一 をまとめて実行する
 export async function tidy(input, options = {}) {
-  const plugins = await resolvePlugins(options.plugins);
-  const opts = { ...options, ruleSet: ruleSet(plugins.flatMap((p) => p.rules)) };
+  const opts = { ...options, ruleSet: ruleSet(await resolvePlugins(options.plugins)) };
+  delete opts.plugins;
   const table = await read(input, opts);
   const schema = detect(table, opts);
   const { data, changes, issues } = normalize(table, schema, opts);
@@ -48,8 +47,13 @@ export async function tidy(input, options = {}) {
 
 // 処理結果（data・schema・changes・issues・clusters・meta だけの素のオブジェクト）に操作を付ける。
 // Web Worker から受け取った結果や、JSONとして保存した結果を元に戻すのに使う
+// hydrate は渡したオブジェクトをそのまま使う（コピーしない）。保存用に切り離したいときは toPlain() を使う
 export function hydrate(plain) {
-  const result = { clusters: [], ...plain };
+  if (!plain || typeof plain !== 'object') throw new TypeError('hydrate には toPlain() の結果を渡してください');
+  for (const key of ['data', 'schema', 'changes', 'issues']) {
+    if (!Array.isArray(plain[key])) throw new TypeError(`hydrate に渡す結果に ${key}（配列）がありません`);
+  }
+  const result = { ...plain, clusters: plain.clusters ?? [], meta: plain.meta ?? {} };
   const { data } = result;
   const api = {
     ...result,
@@ -62,8 +66,8 @@ export function hydrate(plain) {
     toTableHTML: () => toTableHTML(result),
     toCardsHTML: (opts) => toCardsHTML(result, opts),
     toJSON: () => data,
-    // Web Worker に渡したり、保存して hydrate で戻したりできる素のオブジェクト
-    toPlain: () => ({ data: result.data, schema: result.schema, changes: result.changes, issues: result.issues, clusters: result.clusters, meta: result.meta }),
+    // Web Worker に渡したり、保存して hydrate で戻したりできる素のオブジェクト（その時点の写し。後の修正は反映されない）
+    toPlain: () => structuredClone({ data: result.data, schema: result.schema, changes: result.changes, issues: result.issues, clusters: result.clusters, meta: result.meta }),
     toCSV: (opts) => toCSV(result, opts),
     render: (el, opts) => render(el, result, opts),
     renderReview: (el, opts) => renderReview(el, api, opts),

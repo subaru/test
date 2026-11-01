@@ -45,7 +45,6 @@
       "types": "./types/element.d.ts",
       "default": "./src/view/element.js"
     },
-    "./worker": "./src/worker.js",
     "./package.json": "./package.json"
   },
   "bin": {
@@ -69,5 +68,18 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "typesVersions": {
+    "*": {
+      "address": [
+        "types/address.d.ts"
+      ],
+      "element": [
+        "types/element.d.ts"
+      ],
+      "view": [
+        "types/view.d.ts"
+      ]
+    }
   }
 }

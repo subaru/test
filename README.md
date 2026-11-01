@@ -77,13 +77,17 @@ await tidy(file, { plugins: ['address'] }); // または import address from 'ni
 | `大阪市北区梅田1丁目1番地` → `大阪府大阪市北区梅田1-1` | **提案**（政令指定都市から都道府県を補う） |
 | `千代田区丸の内二丁目7番2号` → `東京都千代田区丸の内2-7-2` | **提案**（東京23区から補う） |
 | `港区六本木6-10-1`・`府中市宮西町2-24` | 補わない（同じ名前の区・市がほかの都市にある） |
+| `東京都港区赤坂1丁目2番地 405号室` → `東京都港区赤坂1-2 405号室` | 空白のあと（建物名・階・部屋番号）には触れない |
+| `東京都千代田区三番町6-1`・`麻布十番2-3-1`・`三の丸三丁目1番2号` → `三の丸3-1-2` | 地名・建物名の中の漢数字はそのまま（丁目・番・号の並びの中だけ数字にする） |
 | `東京府千代田区1-1` | 要確認（都道府県名の誤り） |
 
-`parseAddress('三重県四日市市諏訪町1-5')` で `{ postal, prefecture, city, rest }` に分けられます（「四日市市」「廿日市市」のような名前も扱います）。辞書を持たない軽量版なので、市区町村が実在するかの確認や、全国の市町村からの都道府県の補完はしません。必要なら、辞書を持つ専用のライブラリを独自のプラグインとして組み合わせてください。
+`parseAddress('三重県四日市市諏訪町1-5')` で `{ postal, prefecture, city, rest }` に分けられます（「四日市市」「廿日市市」のような名前も扱います）。住所の列と判定するのは、市区町村と番地らしい数字の両方がある値です（「新宿区立第2小学校」「北海道大学 第二号館」のような施設・組織の名前は住所にしません）。辞書を持たない軽量版なので、市区町村が実在するかの確認や、全国の市町村からの都道府県の補完はしません。必要なら、辞書を持つ専用のライブラリを独自のプラグインとして組み合わせてください。
 
 ### プラグイン
 
-列の種類の規則を足せます。規則は `{ type, label, hint?, minRatio?, match(value, ctx), normalize(value, ctx) }` で、`normalize` は `{ value, confidence, note }` か `null`（解釈できない）を返します。プラグインの規則は、組み込みの規則より先に試します。
+列の種類の規則を足せます。規則は `{ type, label, hint?, minRatio?, match(value, ctx), normalize(value, ctx) }` で、`normalize` は `{ value, confidence, note }` か `null`（解釈できない）を返します。プラグインの規則は組み込みの規則より先に試し、組み込みと同じ `type`（`phone` など）なら列の判定にも正規化にもプラグインの規則を使います。規則の形が違う・`match` や `normalize` がエラーを出した場合は、プラグイン名と規則名の付いたエラーになります。
+
+`columns: { 住所: { type: 'address' } }` のように、存在しない種類（プラグインを指定していない `address` など）を指定するとエラーになります。
 
 ```js
 const sku = {
@@ -101,7 +105,11 @@ import { tidyInWorker } from 'nihon-tidy';
 const result = await tidyInWorker(file, { plugins: ['address'] }); // tidy と同じ結果。画面を止めない
 ```
 
-`<tidy-table worker>` でも使えます。Worker が使えない環境（Node.js など）では、そのまま `tidy` を呼びます。Worker には関数を渡せないので、プラグインは名前で指定します。10万行のCSVで、メインスレッドでは処理中（約2.3秒）画面が止まりますが、Worker では止まりません。
+`<tidy-table worker>` でも使えます。Worker には関数を渡せないので、プラグインは名前で指定します（どの環境でも、オブジェクトで渡すとエラー）。
+
+Worker が使えない場合は、メインスレッドで `tidy` を呼びます：Node.js、ライブラリを別のオリジン（CDNなど）から読み込んだ場合（ブラウザの制限で Worker を作れない）、バンドラーが `worker.js` を出力しない場合。画面を止めたくない場合は、ライブラリをページと同じオリジンに置いてください。
+
+処理時間はデータと環境によります（例：10万行×4列のCSVで約2〜3秒。メインスレッドではその間画面が止まりますが、Worker では止まりません）。
 
 ### 入力
 
@@ -232,7 +240,7 @@ result.toReport() // 分析レポートHTML（1ファイルで完結）
 result.toReport({ title: '顧客データ' })   // 見出しも変えられる
 result.toCSV({ bom: true })   // safe: false で数式インジェクション対策を外す
 result.toJSON()
-result.toPlain()      // 素のオブジェクト。保存したものは hydrate(plain) で操作を付け直せる
+result.toPlain()      // その時点の写し（素のオブジェクト）。保存したものは hydrate(plain) で操作を付け直せる
 result.toTableHTML() / result.toCardsHTML({ titleColumn: '顧客名' }) // 文字列のHTML（サーバー側で使う場合）
 result.render(el, { view: 'table', placeholder: '検索', style: false }) // style: false で既定のCSSを入れない
 
@@ -244,7 +252,7 @@ result.acceptAll()                      // 提案をすべて適用
 result.setCanonical(0, '(株)ABC')       // 表記ゆれの統一先を選び直す
 ```
 
-段階ごとに `read` → `detect` → `normalize` → `cluster` → `toReport` を個別に呼ぶこともできます。比較用の `fingerprint`、規則の一覧 `rules` も公開しています。
+段階ごとに `read` → `detect` → `normalize` → `cluster` → `toReport` を個別に呼ぶこともできます（プラグインは `plugins: [address()]` のようにオブジェクトで渡すか、`ruleSet: ruleSet(address().rules)` を渡します。名前での指定は `tidy` だけ）。比較用の `fingerprint`、規則の一覧 `rules` も公開しています。
 
 ## API
 
@@ -255,8 +263,10 @@ result.setCanonical(0, '(株)ABC')       // 表記ゆれの統一先を選び直
 | `nihon-tidy` | `tidy`・`tidyInWorker`・`hydrate`・`read`・`detect`・`normalize`・`cluster`・`toReport`・`toCSV`・`toTableHTML`・`toCardsHTML`・`render`・`renderReview`・`fingerprint`・`rules`・`ruleSet`、処理結果のプロパティとメソッド、`TidyOptions` のオプション |
 | `nihon-tidy/address` | `address()`・`parseAddress`・`normalizeBlock`・`kanjiToNumber`・`addressRule`・`PREFECTURES` |
 | `nihon-tidy/element` | `<tidy-table>` の属性・プロパティ・イベント |
-| `nihon-tidy/view` | `render`・`toTableHTML`・`toCardsHTML` |
+| `nihon-tidy/view` | `render`・`toTableHTML`・`toCardsHTML`・`format`（値を表示用の文字列に）・`STYLE`（既定のCSS） |
 | CLI | `nihon-tidy` のオプション |
+
+`src/worker.js` は `tidyInWorker` が内部で使うもので、公開APIではありません。
 
 次のものは公開APIに含めません（マイナーバージョンでも変わることがあります）：推論・正規化の結果そのもの（判定の改善で、同じ入力でも結果が変わることがあります）、`change.note`・`issue.reason`・`meta.how` の文言、分析レポートHTMLの見た目、`src/` の中のその他のモジュール。
 

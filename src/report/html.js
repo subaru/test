@@ -21,7 +21,7 @@ function columnCard(col, changes, issues) {
   const n = changes.filter((c) => c.column === col.name).length;
   const k = issues.filter((c) => c.column === col.name).length;
   const level = col.type === 'text' ? 'neutral' : col.confidence >= 0.95 ? 'good' : 'warn';
-  const alts = col.candidates
+  const alts = (col.candidates ?? [])
     .filter((c) => c.type !== col.type)
     .slice(0, 2)
     .map((c) => `${escape(c.label)} ${pct(c.ratio)}`)

@@ -1,0 +1,130 @@
+// v1.0 のレビューで見つかった不具合の再発防止
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { tidy, tidyInWorker, hydrate, read, detect, normalize, ruleSet } from '../src/index.js';
+import address, { addressRule, parseAddress, kanjiToNumber } from '../src/plugins/address.js';
+
+const norm = (v) => addressRule.normalize(v)?.value ?? null;
+
+test('住所: 空白のあと（部屋番号・階）を番地につなげない', () => {
+  assert.equal(norm('東京都港区赤坂1-2-3 101'), '東京都港区赤坂1-2-3 101');
+  assert.equal(norm('東京都中央区新川1-2 3階'), '東京都中央区新川1-2 3階');
+  assert.equal(norm('東京都港区赤坂一丁目2番3号 4階'), '東京都港区赤坂1-2-3 4階');
+  assert.equal(norm('東京都港区赤坂123番地 2階'), '東京都港区赤坂123 2階');
+  assert.equal(norm('東京都中央区銀座4丁目 3F'), '東京都中央区銀座4丁目 3F');
+});
+
+test('住所: 「号室」「号館」の号を消さない・迷う書き方はまとめない', () => {
+  assert.equal(norm('東京都港区赤坂1丁目2番地 405号室'), '東京都港区赤坂1-2 405号室');
+  assert.equal(norm('東京都港区赤坂5番地 101号室'), '東京都港区赤坂5 101号室');
+  assert.equal(norm('東京都港区赤坂1丁目2番405号室'), '東京都港区赤坂1丁目2番405号室');
+});
+
+test('住所: 地名・建物名の中の漢数字はそのまま', () => {
+  assert.equal(norm('東京都千代田区三番町6-1'), '東京都千代田区三番町6-1');
+  assert.equal(norm('東京都港区麻布十番2-3-1'), '東京都港区麻布十番2-3-1');
+  assert.equal(norm('宮城県仙台市青葉区一番町一丁目1番1号'), '宮城県仙台市青葉区一番町1-1-1');
+  assert.equal(norm('愛知県名古屋市中区三の丸三丁目1番2号'), '愛知県名古屋市中区三の丸3-1-2');
+  assert.equal(norm('東京都荒川区南千住三の輪1-1'), '東京都荒川区南千住三の輪1-1');
+  assert.equal(norm('東京都中央区銀座四丁目六番十六号'), '東京都中央区銀座4-6-16');
+  assert.equal(norm('東京都港区〇〇番地'), '東京都港区〇〇番地');
+  assert.equal(kanjiToNumber('〇〇'), null);
+  assert.equal(kanjiToNumber(''), null);
+});
+
+test('住所: 都道府県の誤りの判定を、市区町村名の中の「都・府・道」に当てない', () => {
+  assert.equal(norm('大阪市都島区東野田町1-1'), '大阪府大阪市都島区東野田町1-1');
+  assert.equal(norm('横浜市都筑区茅ケ崎中央1-1'), '神奈川県横浜市都筑区茅ケ崎中央1-1');
+  assert.equal(norm('太宰府市宰府4-7-1'), '太宰府市宰府4-7-1');
+  assert.equal(norm('松山市道後湯之町1-1'), '松山市道後湯之町1-1');
+  assert.equal(norm('東京府千代田区1-1'), null);
+});
+
+test('住所: 番地の・〒のない郵便番号・郡の町村名', () => {
+  assert.equal(norm('埼玉県川越市大字小仙波123番地の4'), '埼玉県川越市大字小仙波123-4');
+  assert.equal(norm('100-0001東京都千代田区千代田1-1'), '〒100-0001 東京都千代田区千代田1-1');
+  assert.equal(norm('1000001 東京都千代田区千代田1-1'), '〒100-0001 東京都千代田区千代田1-1');
+  assert.equal(parseAddress('佐賀県杵島郡大町町大字福母1').city, '杵島郡大町町');
+  assert.equal(parseAddress('群馬県佐波郡玉村町下新田1').city, '佐波郡玉村町');
+});
+
+test('住所: 施設・組織の名前の列を住所にしない', async () => {
+  const r = await tidy('所属,学校\n北海道大学 第二号館,新宿区立第2小学校\n東京都交通局 一番線,渋谷区立第1中学校\n大阪府立大学 3号棟,港区立第3小学校\n', { plugins: ['address'] });
+  assert.deepEqual(r.schema.map((c) => c.type), ['text', 'text']);
+  assert.equal(r.data[0].所属, '北海道大学 第二号館');
+  for (const v of ['市場調査', '区分', '町内会の集まり']) assert.equal(addressRule.match(v), false);
+});
+
+test('住所: 長い文でも時間がかからない', () => {
+  const t = Date.now();
+  addressRule.match('郡'.repeat(20000));
+  addressRule.match('市場の動向について議論した。'.repeat(2000));
+  assert.ok(Date.now() - t < 500);
+});
+
+// --- プラグインの仕組み ---
+
+test('プラグイン: 組み込みと同じ type なら、判定にも正規化にもプラグインの規則を使う', async () => {
+  const phone = { type: 'phone', label: '内線', hint: /tel/i, match: (v) => /^\d{3}$/.test(v), normalize: (v) => ({ value: `#${v}`, confidence: 1, note: '内線' }) };
+  const r = await tidy('tel\n123\n456\n', { plugins: [{ name: 'ext', rules: [phone] }] });
+  assert.equal(r.schema[0].label, '内線');
+  assert.deepEqual(r.data.map((d) => d.tel), ['#123', '#456']);
+});
+
+test('プラグイン: 規則の形の誤り・規則の中のエラーは、名前の付いたエラーにする', async () => {
+  await assert.rejects(tidy('a\n1\n', { plugins: [{ name: 'p', rules: [{ type: 'x' }] }] }), /プラグイン「p」の規則「x」：match と normalize/);
+  await assert.rejects(tidy('a\n1\n', { plugins: [{ name: 'p', rules: [null] }] }), /オブジェクトではありません/);
+  const boom = { type: 'b', label: 'B', match: () => { throw new Error('壊れた'); }, normalize: () => null };
+  await assert.rejects(tidy('a\n1\n', { plugins: [{ name: 'p', rules: [boom] }] }), /プラグイン「p」の規則「b」の match でエラー.*壊れた/);
+  const bad = { type: 'c', label: 'C', match: () => true, normalize: (v) => v };
+  await assert.rejects(tidy('a\n1\n', { plugins: [{ name: 'p', rules: [bad] }] }), /normalize は \{ value, confidence, note \}/);
+  await assert.rejects(tidy('a\n1\n', { plugins: 'address' }), /配列で指定/);
+  assert.equal((await tidy('a\n1\n', { plugins: null })).data.length, 1);
+});
+
+test('プラグイン: hint の g フラグで結果が交互に変わらない', async () => {
+  const sku = { type: 'sku', label: '品番', hint: /sku/g, minRatio: 0, match: (v, ctx) => ctx.hinted && /^\w+$/.test(v), normalize: (v) => ({ value: v.toUpperCase(), confidence: 1, note: '' }) };
+  const r = await tidy('sku_a,sku_b,sku_c,sku_d\nx,x,x,x\n', { plugins: [{ name: 's', rules: [sku] }] });
+  assert.deepEqual(r.schema.map((c) => c.type), ['sku', 'sku', 'sku', 'sku']);
+});
+
+test('列の種類の指定：存在しない種類はエラーにする', async () => {
+  await assert.rejects(tidy('住所\n東京都千代田区1-1\n', { columns: { 住所: { type: 'address' } } }), /plugins: \['address'\]/);
+  await assert.rejects(tidy('a\n1\n', { columns: { a: { type: 'bogus' } } }), /種類「bogus」はありません/);
+  const r = await tidy('住所\n東京都千代田区1-1\n', { columns: { 住所: { type: 'address' } }, plugins: ['address'] });
+  assert.equal(r.schema[0].type, 'address');
+});
+
+test('段階ごとの呼び出しでもプラグインを使える', async () => {
+  const table = await read('住所\n東京都中央区銀座四丁目6番16号\n');
+  assert.equal(detect(table, { plugins: [address()] })[0].type, 'address');
+  const schema = detect(table, { ruleSet: ruleSet(address().rules) });
+  assert.equal(normalize(table, schema, { plugins: [address()] }).data[0].住所, '東京都中央区銀座4-6-16');
+  assert.throws(() => detect(table, { plugins: ['address'] }), /オブジェクトで渡して/);
+});
+
+// --- hydrate・toPlain・Worker ---
+
+test('hydrate: 入力を確かめ、clusters・meta がなくても使える', async () => {
+  for (const bad of [null, 'abc', {}, { data: [] }]) assert.throws(() => hydrate(bad), /hydrate/);
+  const h = hydrate({ data: [{ a: '1' }], schema: [{ name: 'a', type: 'text', label: 'テキスト' }], changes: [], issues: [], clusters: undefined });
+  assert.deepEqual(h.clusters, []);
+  assert.match(h.toReport(), /<!DOCTYPE html>/);
+});
+
+test('toPlain: その時点の写しで、後の修正は反映されない', async () => {
+  const r = await tidy('a\nx\n');
+  const snap = r.toPlain();
+  r.fix(0, 'a', 'y');
+  assert.equal(snap.data[0].a, 'x');
+  assert.equal(r.data[0].a, 'y');
+});
+
+test('tidyInWorker: プラグインをオブジェクトで渡すとどの環境でもエラー', async () => {
+  await assert.rejects(tidyInWorker('a\n1\n', { plugins: [address()] }), /名前の配列/);
+});
+
+test('src/worker.js を Worker の外で読み込んでも何もしない', async () => {
+  await import('../src/worker.js');
+  assert.equal(globalThis.onmessage ?? null, null);
+});

@@ -34,9 +34,10 @@ const TRICKY_CITIES = ['四日市市', '廿日市市', '野々市市', '市原�
 
 const KANJI_DIGITS = { 〇: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 
-// 漢数字（〜九十九、百・千を含む）を数に
+// 漢数字（〜九十九、百・千を含む）を数に。伏せ字の「〇〇」や空の文字列は null
 export function kanjiToNumber(s) {
-  if (/^[〇一二三四五六七八九]+$/.test(s) && !/[十百千]/.test(s) && s.length > 1) return Number([...s].map((c) => KANJI_DIGITS[c]).join(''));
+  if (!s || /^〇/.test(s)) return s === '〇' ? 0 : null;
+  if (/^[〇一二三四五六七八九]+$/.test(s) && s.length > 1) return Number([...s].map((c) => KANJI_DIGITS[c]).join(''));
   let total = 0;
   let cur = 0;
   for (const c of s) {
@@ -52,18 +53,26 @@ export function kanjiToNumber(s) {
 }
 
 const PREF_RE = new RegExp(`^(${PREFECTURES.join('|')})`);
-// 都道府県らしいが一覧にないもの（「東京府」「大坂府」など）
-const PREF_LIKE = /^([^\s\d]{2,3}[都道府県])/;
+// 都道府県らしいが一覧にないもの（「東京府」「大坂府」など）。
+// 「大阪市都島区」「横浜市都筑区」「太宰府市」「松山市道後」は、市区町村名の一部なので含めない
+const PREF_LIKE = /^([^\s\d市区町村郡]{2,3}[都道府県])(?![市区町村])/;
 
-const CITY_RE = new RegExp(`^(${TRICKY_CITIES.join('|')}|[^\\s\\d]+?郡[^\\s\\d]+?[町村]|[^\\s\\d]+?市[^\\s\\d]+?区|[^\\s\\d]+?[市区町村])`);
+// 郡のあとの町村名に「町・村」を含むもの（「杵島郡大町町」を「杵島郡大町」で切らないように）
+const TRICKY_TOWNS = ['大町町', '玉村町', '市貝町', '上市町', '下市町', '中村町'];
+// 名前の長さに上限を付けて、長い文でも時間がかからないようにする
+const N = '[^\\s\\d]{1,12}?';
+const CITY_RE = new RegExp(`^(${TRICKY_CITIES.join('|')}|${N}郡(?:${TRICKY_TOWNS.join('|')})|${N}郡${N}[町村]|${N}市${N}区|${N}[市区町村])`);
+
+const POSTAL = /^〒?\s*(\d{3})-?(\d{4})\s*/;
 
 // 住所を分ける。分けられない部分は rest に残す
 export function parseAddress(value) {
   // 郵便番号の「ー」（長音記号）などもハイフンとして読む
   let s = String(value).trim().replace(/^(〒?\s*\d{3})[‐‑‒–—―−ー－](\d{4})/, '$1-$2');
   const out = { postal: null, prefecture: null, city: null, rest: '' };
-  const postal = s.match(/^〒?\s*(\d{3})-?(\d{4})\s*/);
-  if (postal && (s.startsWith('〒') || /^\d{3}-\d{4}\s/.test(s))) {
+  const postal = s.match(POSTAL);
+  // 〒がなければ、郵便番号のあとに都道府県が続く場合だけ郵便番号とみなす
+  if (postal && (s.startsWith('〒') || PREF_RE.test(s.slice(postal[0].length)))) {
     out.postal = `${postal[1]}-${postal[2]}`;
     s = s.slice(postal[0].length);
   }
@@ -81,19 +90,32 @@ export function parseAddress(value) {
   return out;
 }
 
-// 丁目・番地・号の表記を「4-6-16」の形に
+const KANJI_NUM = '[〇一二三四五六七八九十百千]+';
+// 号のあとに続くと「号室・号館」などになる文字。番地の「号」として扱わない
+const NOT_GO = '(?![室館棟車線機])';
+
+// 丁目・番地・号の表記を「4-6-16」の形にする。
+// 空白のあと（建物名・階・部屋番号）には触れない。迷う書き方はそのまま残す
 export function normalizeBlock(rest) {
-  let s = rest
-    // 漢数字の丁目・番地・番・号（「四丁目」「十二番地」）を数字に
-    .replace(/([〇一二三四五六七八九十百千]+)(?=丁目|番地|番|号|の)/g, (m) => String(kanjiToNumber(m) ?? m))
-    // 数字の間のハイフンに見える文字・「の」を - に
-    .replace(/(?<=\d)\s*[‐‑‒–—―−ー－の]\s*(?=\d)/g, '-');
-  // 「4丁目6番16号」「4丁目6番地16」「4丁目6-16」「6番地16」「6番16号」→ ハイフン区切り
-  s = s.replace(/(\d+)丁目\s*(\d+)(?:番地?|-)\s*(\d+)(?:号)?/g, '$1-$2-$3');
-  s = s.replace(/(\d+)丁目\s*(\d+)(?:番地?|号)?(?![\d-])/g, '$1-$2');
-  s = s.replace(/(\d+)番地?\s*(\d+)号?/g, '$1-$2');
-  s = s.replace(/(\d+)番地(?![\d-])/g, '$1');
-  return s.replace(/(\d)\s+(?=\d)/g, '$1');
+  const space = rest.search(/\s/);
+  let s = space < 0 ? rest : rest.slice(0, space);
+  const tail = space < 0 ? '' : rest.slice(space);
+
+  // 漢数字は、丁目・番・号の並びの中だけ数字にする（「三番町」「麻布十番」「第二号館」「三の丸」は地名・建物名）
+  s = s.replace(new RegExp(`(${KANJI_NUM})(?=丁目)`, 'g'), (m) => String(kanjiToNumber(m) ?? m));
+  s = s.replace(new RegExp(`(?<=(?:\\d|丁目|番地?|号)-?)(${KANJI_NUM})(?=番地?|号${NOT_GO}|$)`, 'g'), (m) => String(kanjiToNumber(m) ?? m));
+  // 数字の間のハイフンに見える文字と「の」を -
+  s = s.replace(/(?<=\d)[‐‑‒–—―−ー－の](?=\d)/g, '-');
+
+  // 部屋番号らしいもの（「405号室」）が空白なしで続くなら、番地はまとめない（取り違えを避ける）
+  if (/\d号[室館棟]/.test(s)) return rest;
+
+  const END = `(?=$|[^\\d号階FＦｆ-])`;
+  s = s.replace(new RegExp(`(\\d+)丁目(\\d+)(?:番地?|-)(\\d+)(?:号${NOT_GO})?${END}`, 'g'), '$1-$2-$3');
+  s = s.replace(new RegExp(`(\\d+)丁目(\\d+)(?:番地?|号${NOT_GO})${END}`, 'g'), '$1-$2');
+  s = s.replace(new RegExp(`(\\d+)番地?の?(\\d+)(?:号${NOT_GO})?${END}`, 'g'), '$1-$2');
+  s = s.replace(new RegExp(`(\\d+)番地${END}`, 'g'), '$1');
+  return s + tail;
 }
 
 function parse(v) {
@@ -105,7 +127,7 @@ function parse(v) {
   let prefecture = a.prefecture;
   if (!prefecture) {
     // 「東京府」「大坂府」など、都道府県らしいが一覧にない名前は解釈しない（要確認に挙げる）
-    const wrong = v.replace(/^〒?\s*\d{3}-?\d{4}\s*/, '').match(PREF_LIKE);
+    const wrong = v.replace(POSTAL, '').match(PREF_LIKE);
     if (wrong && !PREFECTURES.includes(wrong[1])) return null;
     const guess = DESIGNATED[a.city?.match(/^[^\s\d]+?市/)?.[0]] ?? (TOKYO_WARDS.includes(a.city) ? '東京都' : null);
     if (guess) {
@@ -122,14 +144,20 @@ function parse(v) {
   return { value, confidence, note: notes.join('、') || '住所の表記を統一', parts: { ...a, prefecture, rest } };
 }
 
+// 市区町村のあとが「立・役所・議会」などなら、住所ではなく施設・組織の名前
+const NOT_ADDRESS = /^(?:立|役所|役場|議会|内|民|長|政|域|分|画|場|販売|営)/;
+const BLOCK_LIKE = /\d|[〇一二三四五六七八九十]+丁目/;
+
 export const addressRule = {
   type: 'address',
   label: '住所',
   hint: /住所|所在地|address|addr|送付先|届け先/i,
-  // 住所の列だと言えるのは、都道府県か市区町村で始まり、番地らしい数字を含むもの
-  match: (v) => {
+  // 住所の列だと言えるのは、市区町村があり、そのあとに番地らしい数字があるもの。
+  // 都道府県だけの値は、列名が住所らしい場合だけ
+  match: (v, ctx = {}) => {
     const a = parseAddress(v);
-    return !!(a.prefecture || (a.city && /\d|[〇一二三四五六七八九十]+丁目/.test(a.rest)));
+    if (a.city) return !NOT_ADDRESS.test(a.rest) && BLOCK_LIKE.test(a.rest);
+    return !!(a.prefecture && ctx.hinted && (!a.rest || BLOCK_LIKE.test(a.rest)));
   },
   normalize: parse,
 };

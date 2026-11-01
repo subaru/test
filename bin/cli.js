@@ -12,7 +12,7 @@ const USAGE = `使い方: nihon-tidy <入力ファイル> [オプション]
   --report <file.html>      分析レポートHTMLを書き出す
   --out <file.json|.csv>    正規化したデータを書き出す（CSVはExcel向けにBOM付き）
   --min-confidence <0〜1>   これ未満の変換は提案にとどめる（既定 0.9）
-  --help                    この説明を表示する`;
+  -h, --help                この説明を表示する`;
 
 const VALUED = ['sheet', 'table', 'format', 'plugins', 'report', 'out', 'min-confidence'];
 
@@ -50,6 +50,7 @@ if (opts['min-confidence'] !== undefined) {
   if (!(n >= 0 && n <= 1)) fail(`--min-confidence は 0〜1 の数で指定してください：${opts['min-confidence']}`);
   options.minConfidence = n;
 }
+if (opts.out !== undefined && !/\.(json|csv)$/i.test(opts.out)) fail(`--out は .json か .csv のファイル名で指定してください：${opts.out}`);
 if (opts.table !== undefined) {
   if (!/^\d+$/.test(opts.table)) fail(`--table は 0 から始まる番号で指定してください：${opts.table}`);
   options.table = Number(opts.table);

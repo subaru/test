@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 // nihon-tidy の型定義（v1.0 の公開API）
 
 export type ColumnType = 'text' | 'date' | 'phone' | 'postal' | 'email' | 'boolean' | 'kana' | 'number' | 'address' | (string & {});
@@ -46,8 +47,10 @@ export interface TidyOptions {
   threshold?: number;
   /** 列名にヒントがある場合の一致率（既定 0.5） */
   hintedThreshold?: number;
-  /** プラグイン。組み込みは名前で指定できる（'address'） */
+  /** プラグイン。組み込みは名前で指定できる（'address'）。detect・normalize を段階ごとに呼ぶときはオブジェクトで渡す */
   plugins?: Array<'address' | Plugin>;
+  /** 段階ごとに呼ぶときの規則の組（ruleSet(address().rules) など）。plugins より優先する */
+  ruleSet?: RuleSet;
 }
 
 export interface Column {
@@ -61,7 +64,7 @@ export interface Column {
   nonEmpty: number;
   empty: number;
   unique: number;
-  candidates: Array<{ type: string; label: string; ratio: number; hinted: boolean }>;
+  candidates: Array<{ type: string; label: string; ratio: number; hinted: boolean; minRatio: number }>;
 }
 
 export interface Change {
@@ -143,6 +146,7 @@ export interface TidyResult extends PlainResult {
   toReport(options?: { title?: string }): string;
   toCSV(options?: { bom?: boolean; safe?: boolean }): string;
   toJSON(): DataRecord[];
+  /** その時点の写し（後の fix などは反映されない） */
   toPlain(): PlainResult;
   toTableHTML(): string;
   toCardsHTML(options?: { titleColumn?: string }): string;
@@ -160,7 +164,7 @@ export interface Table {
 export function tidy(input: Input, options?: TidyOptions): Promise<TidyResult>;
 /** Web Worker の中で tidy を動かす（Worker のない環境では tidy と同じ）。プラグインは名前で指定する */
 export function tidyInWorker(input: Input, options?: Omit<TidyOptions, 'plugins'> & { plugins?: Array<'address'> }): Promise<TidyResult>;
-/** toPlain() や Worker の結果に操作を付け直す */
+/** toPlain() や Worker の結果に操作を付け直す（渡したオブジェクトをそのまま使い、コピーしない） */
 export function hydrate(plain: PlainResult): TidyResult;
 
 export function read(input: Input, options?: TidyOptions): Promise<Table>;
@@ -175,4 +179,9 @@ export function render(el: Element | string, result: PlainResult, options?: Rend
 export function renderReview(el: Element | string, result: TidyResult, options?: { onChange?(result: TidyResult): void }): { refresh(): void };
 export function fingerprint(value: string): string;
 export const rules: Rule[];
-export function ruleSet(extra?: Rule[]): { list: Rule[]; byType: { [type: string]: Rule } };
+export interface RuleSet {
+  list: Rule[];
+  byType: { [type: string]: Rule };
+}
+/** プラグインの規則を加えた規則の組。同じ type ならプラグインの規則を使う */
+export function ruleSet(extra?: Rule[]): RuleSet;
