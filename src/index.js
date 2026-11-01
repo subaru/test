@@ -34,7 +34,8 @@ async function resolvePlugins(plugins) {
 
 // 読み込み → 列の種類の推論 → 正規化 → 表記ゆれの統一 をまとめて実行する
 export async function tidy(input, options = {}) {
-  const opts = { ...options, ruleSet: ruleSet(await resolvePlugins(options.plugins)) };
+  // ruleSet を渡されたらそれを使う（plugins より優先）
+  const opts = { ...options, ruleSet: options.ruleSet ?? ruleSet(await resolvePlugins(options.plugins)) };
   delete opts.plugins;
   const table = await read(input, opts);
   const schema = detect(table, opts);
@@ -47,7 +48,7 @@ export async function tidy(input, options = {}) {
 
 // 処理結果（data・schema・changes・issues・clusters・meta だけの素のオブジェクト）に操作を付ける。
 // Web Worker から受け取った結果や、JSONとして保存した結果を元に戻すのに使う
-// hydrate は渡したオブジェクトをそのまま使う（コピーしない）。保存用に切り離したいときは toPlain() を使う
+// hydrate は渡した data・changes などの配列をそのまま使う（コピーしない）。保存用に切り離したいときは toPlain() を使う
 export function hydrate(plain) {
   if (!plain || typeof plain !== 'object') throw new TypeError('hydrate には toPlain() の結果を渡してください');
   for (const key of ['data', 'schema', 'changes', 'issues']) {

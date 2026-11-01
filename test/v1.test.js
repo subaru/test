@@ -19,9 +19,10 @@ test('住所: 丁目・番地・号の表記を統一する', () => {
 
 test('住所: 都道府県の補完は提案にとどめ、名前が重なる区・市は補わない', () => {
   const a = norm('大阪市北区梅田1丁目1番地');
-  assert.equal(a.value, '大阪府大阪市北区梅田1-1');
-  assert.equal(a.confidence, 0.8);
-  assert.equal(norm('千代田区丸の内二丁目7番2号 JPタワー').value, '東京都千代田区丸の内2-7-2 JPタワー');
+  // 番地の統一は確実なので適用し、都道府県の補完は別の提案にする
+  assert.equal(a.value, '大阪市北区梅田1-1');
+  assert.deepEqual([a.suggest.value, a.suggest.confidence], ['大阪府大阪市北区梅田1-1', 0.8]);
+  assert.equal(norm('千代田区丸の内二丁目7番2号 JPタワー').suggest.value, '東京都千代田区丸の内2-7-2 JPタワー');
   assert.equal(norm('港区六本木6-10-1').value, '港区六本木6-10-1'); // 東京・名古屋・大阪にある
   assert.equal(norm('府中市宮西町2-24').value, '府中市宮西町2-24'); // 東京・広島にある
 });

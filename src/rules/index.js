@@ -11,7 +11,10 @@ export const ruleByType = Object.fromEntries(rules.map((r) => [r.type, r]));
 export const TEXT = { type: 'text', label: 'テキスト' };
 
 // 規則の形を確かめ、エラーに規則の名前を付ける。hint の g・y フラグは test の結果が交互に変わるので外す
+const CHECKED = Symbol('checked');
+
 export function checkRule(rule, owner = '規則') {
+  if (rule?.[CHECKED]) return rule;
   const where = `${owner}の規則「${rule?.type ?? '?'}」`;
   if (!rule || typeof rule !== 'object') throw new TypeError(`${owner}の規則がオブジェクトではありません`);
   if (typeof rule.type !== 'string' || !rule.type) throw new TypeError(`${where}：type（文字列）がありません`);
@@ -27,8 +30,12 @@ export function checkRule(rule, owner = '規則') {
     }
   };
   const normalize = wrap(rule.normalize, 'normalize');
-  return {
-    ...rule,
+  // 元の規則を原型にする（クラスで書いた規則の getter なども引き継ぐ）。
+  // 原型に getter だけの値があっても上書きできるよう、代入ではなく定義する
+  const own = {
+    [CHECKED]: true,
+    type: rule.type,
+    minRatio: rule.minRatio,
     label: typeof rule.label === 'string' ? rule.label : rule.type,
     hint,
     match: wrap(rule.match, 'match'),
@@ -41,11 +48,12 @@ export function checkRule(rule, owner = '規則') {
       return r;
     },
   };
+  return Object.defineProperties(Object.create(rule), Object.getOwnPropertyDescriptors(own));
 }
 
 // プラグインの規則を加えた規則の組。プラグインの規則を先に試し、同じ type なら（列の判定でも正規化でも）プラグインの規則を使う
 export function ruleSet(extra = []) {
-  const list = [...extra, ...rules];
+  const list = [...extra.map((r) => checkRule(r)), ...rules];
   const byType = {};
   for (const r of list) byType[r.type] ??= r;
   return { list: list.filter((r) => byType[r.type] === r), byType };

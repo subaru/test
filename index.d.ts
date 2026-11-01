@@ -17,7 +17,8 @@ export interface Rule {
   minRatio?: number;
   match(value: string, ctx: { hinted: boolean }): boolean;
   /** 正規化した値と確信度（0〜1）。解釈できなければ null */
-  normalize(value: string, ctx: { hinted: boolean; typed?: boolean }): { value: Value; confidence: number; note: string } | null;
+  /** suggest を返すと、value を適用したうえで別の提案として残す（住所の都道府県の補完など） */
+  normalize(value: string, ctx: { hinted: boolean; typed?: boolean }): { value: Value; confidence: number; note: string; suggest?: { value: Value; confidence: number; note: string } } | null;
 }
 
 export interface Plugin {
@@ -163,8 +164,8 @@ export interface Table {
 
 export function tidy(input: Input, options?: TidyOptions): Promise<TidyResult>;
 /** Web Worker の中で tidy を動かす（Worker のない環境では tidy と同じ）。プラグインは名前で指定する */
-export function tidyInWorker(input: Input, options?: Omit<TidyOptions, 'plugins'> & { plugins?: Array<'address'> }): Promise<TidyResult>;
-/** toPlain() や Worker の結果に操作を付け直す（渡したオブジェクトをそのまま使い、コピーしない） */
+export function tidyInWorker(input: Input, options?: Omit<TidyOptions, 'plugins' | 'ruleSet'> & { plugins?: Array<'address'> }): Promise<TidyResult>;
+/** toPlain() や Worker の結果に操作を付け直す（data などの配列は渡したものを共有し、コピーしない） */
 export function hydrate(plain: PlainResult): TidyResult;
 
 export function read(input: Input, options?: TidyOptions): Promise<Table>;

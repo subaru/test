@@ -6,6 +6,11 @@ import { stageRuleSet } from './rules/index.js';
 export function normalize(table, schema, options = {}) {
   const minConfidence = options.minConfidence ?? 0.9;
   const { byType: ruleByType } = stageRuleSet(options);
+  for (const col of schema) {
+    if (col.type !== 'text' && !ruleByType[col.type]) {
+      throw new Error(`列「${col.name}」の種類「${col.type}」の規則がありません（detect と同じ plugins か ruleSet を渡してください）`);
+    }
+  }
   const changes = [];
   const issues = [];
 
@@ -42,6 +47,12 @@ export function normalize(table, schema, options = {}) {
           else issues.push({ row: ri, column: col.name, value: raw, reason: `確信度が低いため未適用（提案: ${r.value}）`, suggestion: r.value });
         } else {
           value = r.value;
+        }
+        // 規則が別の提案を返したら（住所の都道府県の補完など）、適用した値とは別に提案として残す
+        const sg = r?.suggest;
+        if (sg && String(sg.value) !== String(value)) {
+          changes.push({ row: ri, column: col.name, before: raw, after: sg.value, rule: col.type, note: sg.note, confidence: sg.confidence, applied: false });
+          issues.push({ row: ri, column: col.name, value: raw, reason: `確信度が低いため未適用（提案: ${sg.value}）`, suggestion: sg.value });
         }
       }
 

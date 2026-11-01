@@ -33,8 +33,8 @@ test('住所: 地名・建物名の中の漢数字はそのまま', () => {
 });
 
 test('住所: 都道府県の誤りの判定を、市区町村名の中の「都・府・道」に当てない', () => {
-  assert.equal(norm('大阪市都島区東野田町1-1'), '大阪府大阪市都島区東野田町1-1');
-  assert.equal(norm('横浜市都筑区茅ケ崎中央1-1'), '神奈川県横浜市都筑区茅ケ崎中央1-1');
+  assert.equal(addressRule.normalize('大阪市都島区東野田町1-1').suggest.value, '大阪府大阪市都島区東野田町1-1');
+  assert.equal(addressRule.normalize('横浜市都筑区茅ケ崎中央1-1').suggest.value, '神奈川県横浜市都筑区茅ケ崎中央1-1');
   assert.equal(norm('太宰府市宰府4-7-1'), '太宰府市宰府4-7-1');
   assert.equal(norm('松山市道後湯之町1-1'), '松山市道後湯之町1-1');
   assert.equal(norm('東京府千代田区1-1'), null);
@@ -127,4 +127,89 @@ test('tidyInWorker: プラグインをオブジェクトで渡すとどの環境
 test('src/worker.js を Worker の外で読み込んでも何もしない', async () => {
   await import('../src/worker.js');
   assert.equal(globalThis.onmessage ?? null, null);
+});
+
+// --- 2回目のレビュー：「確実に分かる形だけを変える」方式への作り直し ---
+
+test('住所: 番地の部分が決まった形でなければ変えない（後ろに建物名・B1F・地先などが続く）', () => {
+  for (const v of [
+    '東京都新宿区歌舞伎町1-2-3一番街ビル',
+    '東京都新宿区西新宿1-2-3一番館101',
+    '東京都港区芝1丁目2番3号一番館',
+    '東京都千代田区丸の内1丁目9番1号B1F',
+    '東京都港区芝1丁目2番3号B101',
+    '東京都港区芝1丁目2番3号店',
+    '東京都港区芝12番地先',
+    '東京都港区芝12番地内',
+    '東京都港区芝12番地付近',
+  ]) assert.equal(norm(v), v, v);
+});
+
+test('住所: 空白のあとが番地の続きなら変えない・伏せ字の〇は数にしない', () => {
+  assert.equal(norm('東京都港区芝1丁目2番 3号'), '東京都港区芝1丁目2番 3号');
+  assert.equal(norm('東京都港区芝12番地 3'), '東京都港区芝12番地 3');
+  assert.equal(norm('東京都港区芝〇丁目〇番〇号'), '東京都港区芝〇丁目〇番〇号');
+  assert.equal(norm('東京都港区芝1丁目〇番〇号'), '東京都港区芝1丁目〇番〇号');
+});
+
+test('住所: 決まった形の番地は、漢数字・番地の・北海道の条丁目も揃える', () => {
+  assert.equal(norm('東京都港区芝十二番地'), '東京都港区芝12');
+  assert.equal(norm('東京都千代田区千代田一の一'), '東京都千代田区千代田1-1');
+  assert.equal(norm('北海道札幌市中央区南1条西2丁目3番地'), '北海道札幌市中央区南1条西2-3');
+  assert.equal(norm('北海道札幌市中央区北1条西2丁目'), '北海道札幌市中央区北1条西2丁目');
+  assert.equal(norm('東京都港区芝１丁目２番３号'), '東京都港区芝1-2-3'); // 全角の数字（直接呼んだ場合も）
+});
+
+test('住所: 名前の列を住所にせず、「内・立・長」で始まる町名は住所にする', () => {
+  for (const v of ['中村1', '関東地区1', '下町ロケット2', '港区みなと祭り2024', '新宿区1号店', 'A工区1', '渋谷区役所前店']) {
+    assert.equal(addressRule.match(v), false, v);
+  }
+  for (const v of ['東京都千代田区内神田1-1-1', '東京都葛飾区立石1-1', '千代田区内神田1-1-1', '大阪市中央区内本町1-1', '仙台市太白区長町1-1']) {
+    assert.equal(addressRule.match(v), true, v);
+  }
+});
+
+test('住所: 番地の統一は適用し、都道府県の補完だけを提案にする（提案を適用すると両方そろう）', async () => {
+  const r = await tidy('住所\n大阪市北区梅田1丁目1番地\n千代田区丸の内二丁目7番2号\n', { plugins: ['address'] });
+  assert.deepEqual(r.data.map((d) => d.住所), ['大阪市北区梅田1-1', '千代田区丸の内2-7-2']);
+  assert.ok(r.issues.some((i) => i.row === 0 && i.suggestion === '大阪府大阪市北区梅田1-1'));
+  r.accept(0, '住所');
+  assert.equal(r.data[0].住所, '大阪府大阪市北区梅田1-1');
+  assert.equal(r.changes.filter((c) => c.row === 0).length, 1);
+  assert.equal(r.changes.find((c) => c.row === 0).before, '大阪市北区梅田1丁目1番地');
+});
+
+test('tidy は ruleSet を使い、ruleSet でも規則の形を確かめる', async () => {
+  const r = await tidy('住所\n東京都中央区銀座四丁目6番16号\n', { ruleSet: ruleSet(address().rules) });
+  assert.equal(r.data[0].住所, '東京都中央区銀座4-6-16');
+  assert.throws(() => ruleSet([{ type: 'x' }]), /match と normalize/);
+});
+
+test('クラスで書いた規則の getter（minRatio など）を引き継ぐ', async () => {
+  class Strict {
+    type = 'code';
+    label = 'コード';
+    get minRatio() {
+      return 1;
+    }
+    match(v) {
+      return /^[A-Z]\d$/.test(v);
+    }
+    normalize(v) {
+      return { value: v, confidence: 1, note: '' };
+    }
+  }
+  // 4件中3件しか一致しないので、minRatio 1 の規則は選ばれない
+  const r = await tidy('c\nA1\nB2\nC3\nxyz\n', { plugins: [{ name: 's', rules: [new Strict()] }] });
+  assert.equal(r.schema[0].type, 'text');
+});
+
+test('normalize を段階ごとに呼ぶとき、規則のない種類はエラーにする', async () => {
+  const table = await read('住所\n東京都中央区銀座四丁目6番16号\n');
+  const schema = detect(table, { plugins: [address()] });
+  assert.throws(() => normalize(table, schema), /規則がありません/);
+});
+
+test('tidyInWorker では ruleSet を使えない', async () => {
+  await assert.rejects(tidyInWorker('a\n1\n', { ruleSet: ruleSet() }), /ruleSet は使えません/);
 });
