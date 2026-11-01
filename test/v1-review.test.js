@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { tidy, tidyInWorker, hydrate, read, detect, normalize, ruleSet } from '../src/index.js';
 import address, { addressRule, parseAddress, kanjiToNumber } from '../src/plugins/address.js';
 
-const norm = (v) => addressRule.normalize(v)?.value ?? null;
+// 住所の規則は値を変えず提案を返すので、提案の値（なければ元の値）を見る
+const norm = (v) => { const r = addressRule.normalize(v); return r ? (r.suggest?.value ?? r.value) : null; };
 
 test('住所: 空白のあと（部屋番号・階）を番地につなげない', () => {
   assert.equal(norm('東京都港区赤坂1-2-3 101'), '東京都港区赤坂1-2-3 101');
@@ -99,7 +100,9 @@ test('段階ごとの呼び出しでもプラグインを使える', async () =>
   const table = await read('住所\n東京都中央区銀座四丁目6番16号\n');
   assert.equal(detect(table, { plugins: [address()] })[0].type, 'address');
   const schema = detect(table, { ruleSet: ruleSet(address().rules) });
-  assert.equal(normalize(table, schema, { plugins: [address()] }).data[0].住所, '東京都中央区銀座4-6-16');
+  const n = normalize(table, schema, { plugins: [address()] });
+  assert.equal(n.data[0].住所, '東京都中央区銀座四丁目6番16号'); // 値は変えない
+  assert.equal(n.issues[0].suggestion, '東京都中央区銀座4-6-16');
   assert.throws(() => detect(table, { plugins: ['address'] }), /オブジェクトで渡して/);
 });
 
@@ -169,10 +172,13 @@ test('住所: 名前の列を住所にせず、「内・立・長」で始まる
   }
 });
 
-test('住所: 番地の統一は適用し、都道府県の補完だけを提案にする（提案を適用すると両方そろう）', async () => {
+test('住所: 値は自動では変えず、番地の統一と都道府県の補完をまとめて提案にする（適用すると両方そろう）', async () => {
   const r = await tidy('住所\n大阪市北区梅田1丁目1番地\n千代田区丸の内二丁目7番2号\n', { plugins: ['address'] });
-  assert.deepEqual(r.data.map((d) => d.住所), ['大阪市北区梅田1-1', '千代田区丸の内2-7-2']);
+  assert.deepEqual(r.data.map((d) => d.住所), ['大阪市北区梅田1丁目1番地', '千代田区丸の内二丁目7番2号']);
   assert.ok(r.issues.some((i) => i.row === 0 && i.suggestion === '大阪府大阪市北区梅田1-1'));
+  // minConfidence を下げても提案のまま
+  const low = await tidy('住所\n大阪市北区梅田1丁目1番地\n', { plugins: ['address'], minConfidence: 0.5 });
+  assert.equal(low.data[0].住所, '大阪市北区梅田1丁目1番地');
   r.accept(0, '住所');
   assert.equal(r.data[0].住所, '大阪府大阪市北区梅田1-1');
   assert.equal(r.changes.filter((c) => c.row === 0).length, 1);
@@ -181,7 +187,8 @@ test('住所: 番地の統一は適用し、都道府県の補完だけを提案
 
 test('tidy は ruleSet を使い、ruleSet でも規則の形を確かめる', async () => {
   const r = await tidy('住所\n東京都中央区銀座四丁目6番16号\n', { ruleSet: ruleSet(address().rules) });
-  assert.equal(r.data[0].住所, '東京都中央区銀座4-6-16');
+  assert.equal(r.schema[0].type, 'address');
+  assert.equal(r.issues[0].suggestion, '東京都中央区銀座4-6-16');
   assert.throws(() => ruleSet([{ type: 'x' }]), /match と normalize/);
 });
 
@@ -251,4 +258,23 @@ test('住所: 都道府県のあとに市区町村がない名前（大会名・
   assert.equal(r.schema[0].type, 'text');
   assert.equal(addressRule.match('北海道日本ハムファイターズ2024'), false);
   assert.equal(norm('東京都選抜1の2'), '東京都選抜1の2');
+});
+
+// --- 4回目のレビュー：住所の変換をすべて提案にする・名前の列を住所にしない ---
+
+test('住所: 4回目に見つかった書き方も、値は変わらない（提案だけ）', async () => {
+  const rows = ['東京都港区芝1丁目2番 3ー4', '東京都港区芝1丁目2番 三の四', '東京都港区芝12番地 3番4号', '東京都港区麻布十番二', '東京都港区芝12番地、13番地', '東京都港区芝1〜3丁目2番', '東京都港区芝12番地 他2筆', '東京都港区芝1丁目2号'];
+  const r = await tidy(`住所\n${rows.join('\n')}\n`, { plugins: ['address'] });
+  assert.deepEqual(r.data.map((d) => d.住所), rows);
+  assert.ok(r.changes.every((c) => !c.applied || c.rule === 'common'));
+  r.acceptAll(); // 利用者が承認すれば揃う
+  assert.notDeepEqual(r.data.map((d) => d.住所), rows);
+});
+
+test('住所: 都道府県と市区町村のあとが名前と数字だけの列は住所にしない', async () => {
+  const r = await tidy('イベント\n東京都港区みなと祭り2024\n神奈川県横浜市花火大会2025\n大阪府大阪市マラソン2024\n北海道札幌市雪まつり2026\n', { plugins: ['address'] });
+  assert.equal(r.schema[0].type, 'text');
+  // 列名が住所らしければ、数字だけの番地（地番）も住所とみなす
+  assert.equal(addressRule.match('長野県北佐久郡軽井沢町軽井沢1323', { hinted: true }), true);
+  assert.equal(addressRule.match('長野県北佐久郡軽井沢町軽井沢1323'), false);
 });

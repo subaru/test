@@ -4,7 +4,8 @@
 //   import address from 'nihon-tidy/address';
 //   await tidy(file, { plugins: [address()] });   // 文字列で plugins: ['address'] とも書ける
 //
-// 辞書を持たない軽量版。「確実に分かる形だけを変える」方式で、迷う書き方はそのまま残す。できること：
+// 辞書を持たない軽量版。値は自動では変えず、揃えた形をすべて「提案」として返す（accept・acceptAll で適用）。
+// 提案するのも「確実に分かる形」だけで、迷う書き方はそのまま残す。できること：
 //   - 表記の統一：町名のあとの番地の部分が、全体として「4丁目6番16号」「十二番地」「123番地の4」「1ー2ー3」などの
 //     決まった形のときだけ「4-6-16」の形にする（後ろに建物名などが空白なしで続くなら変えない）。〒の書式
 //   - 都道府県の補完：政令指定都市と、ほかの都市と名前が重ならない東京23区から補う（提案にとどめる）
@@ -161,8 +162,13 @@ export function normalizeBlock(rest) {
 // （「中村1」「港区みなと祭り2024」「新宿区1号店」のような名前を住所にしないため）
 function looksLikeAddress(a, hinted) {
   const b = splitBlock(a.rest);
-  // 都道府県があっても、市区町村がなければ住所としない（「東京都大会2024」「北海道日本ハムファイターズ2024」）
-  if (a.prefecture) return a.city ? !!b : !!(hinted && !a.rest);
+  // 都道府県があっても、市区町村がなければ住所としない（「東京都大会2024」「北海道日本ハムファイターズ2024」）。
+  // 市区町村があっても、番地は丁目・番・号かハイフンを含む形が必要（「東京都港区みなと祭り2024」を住所にしない）。
+  // 数字だけの番地（「軽井沢1323」）は、列名が住所らしい場合だけ
+  if (a.prefecture) {
+    if (!a.city) return !!(hinted && !a.rest);
+    return !!(b && (b.structured || hinted));
+  }
   if (!a.city || !/[市区]$/.test(a.city)) return false;
   return !!(b && b.town && b.structured);
 }
@@ -184,15 +190,20 @@ function parse(raw) {
     const body = `${pref ?? ''}${a.city ?? ''}${rest}`;
     return a.postal ? `〒${a.postal} ${body}` : body;
   };
-  const value = join(a.prefecture);
-  const note = rest !== a.rest ? '丁目・番地の表記を統一' : '住所の表記を統一';
-  const result = { value, confidence: 1, note, parts: { ...a, rest } };
 
-  // 都道府県の補完は、住所と言える形のときだけ、別の提案にする（番地の統一は確実なので先に適用する）
-  if (!a.prefecture && looksLikeAddress(a, false)) {
-    const guess = DESIGNATED[a.city?.match(/^[^\s\d]+?市/)?.[0]] ?? (TOKYO_WARDS.includes(a.city) ? '東京都' : null);
-    if (guess) result.suggest = { value: join(guess), confidence: 0.8, note: `都道府県（${guess}）を市区名から補った` };
+  // 住所は書き方の種類が多く、確実に正しいと言い切れないので、値は変えずにすべて提案にする（確信度 0.8）。
+  // 適用するには accept・acceptAll か、要確認の画面を使う
+  const notes = [];
+  if (rest !== a.rest) notes.push('丁目・番地の表記を統一');
+  let pref = a.prefecture;
+  if (!pref && looksLikeAddress(a, false)) {
+    pref = DESIGNATED[a.city?.match(/^[^\s\d]+?市/)?.[0]] ?? (TOKYO_WARDS.includes(a.city) ? '東京都' : null);
+    if (pref) notes.push(`都道府県（${pref}）を市区名から補った`);
   }
+  const proposed = join(pref);
+  if (proposed !== v && !notes.length) notes.push('郵便番号の書式を統一');
+  const result = { value: v, confidence: 1, note: '住所', parts: { ...a, rest, prefecture: pref ?? null } };
+  if (proposed !== v) result.suggest = { value: proposed, confidence: 0.8, note: notes.join('、') };
   return result;
 }
 

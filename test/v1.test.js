@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { tidy, tidyInWorker, hydrate, read } from '../src/index.js';
 import address, { parseAddress, normalizeBlock, kanjiToNumber, addressRule } from '../src/plugins/address.js';
 
-const norm = (v) => addressRule.normalize(v) ?? null;
+// 住所の規則は値を変えず提案を返すので、提案の値（なければ元の値）を見る
+const norm = (v) => { const r = addressRule.normalize(v); return r ? { ...r, value: r.suggest?.value ?? r.value } : null; };
 
 // --- 住所プラグイン ---
 
@@ -18,11 +19,11 @@ test('住所: 丁目・番地・号の表記を統一する', () => {
 });
 
 test('住所: 都道府県の補完は提案にとどめ、名前が重なる区・市は補わない', () => {
-  const a = norm('大阪市北区梅田1丁目1番地');
-  // 番地の統一は確実なので適用し、都道府県の補完は別の提案にする
-  assert.equal(a.value, '大阪市北区梅田1-1');
+  const a = addressRule.normalize('大阪市北区梅田1丁目1番地');
+  // 値は変えず、番地の統一と都道府県の補完をまとめて提案にする
+  assert.equal(a.value, '大阪市北区梅田1丁目1番地');
   assert.deepEqual([a.suggest.value, a.suggest.confidence], ['大阪府大阪市北区梅田1-1', 0.8]);
-  assert.equal(norm('千代田区丸の内二丁目7番2号 JPタワー').suggest.value, '東京都千代田区丸の内2-7-2 JPタワー');
+  assert.equal(norm('千代田区丸の内二丁目7番2号 JPタワー').value, '東京都千代田区丸の内2-7-2 JPタワー');
   assert.equal(norm('港区六本木6-10-1').value, '港区六本木6-10-1'); // 東京・名古屋・大阪にある
   assert.equal(norm('府中市宮西町2-24').value, '府中市宮西町2-24'); // 東京・広島にある
 });
@@ -39,7 +40,8 @@ test('プラグイン: 名前・オブジェクトで指定でき、住所の列
   for (const plugins of [['address'], [address()]]) {
     const r = await tidy(csv, { plugins });
     assert.equal(r.schema[1].type, 'address');
-    assert.equal(r.data[0].住所, '東京都中央区銀座4-6-16');
+    assert.equal(r.data[0].住所, '東京都中央区銀座四丁目6番16号'); // 値は変えず提案にする
+    assert.ok(r.issues.some((i) => i.row === 0 && i.suggestion === '東京都中央区銀座4-6-16'));
     assert.ok(r.issues.some((i) => i.row === 1 && i.suggestion === '大阪府大阪市北区梅田1-1'));
     assert.ok(r.issues.some((i) => i.row === 2 && /解釈できません/.test(i.reason)));
   }
