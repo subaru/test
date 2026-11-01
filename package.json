@@ -63,7 +63,7 @@
     "./src/worker.js"
   ],
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
     "example": "node bin/cli.js examples/sample-sjis.csv --report examples/report.html --out examples/output.json",
     "prepublishOnly": "npm test"
   },
