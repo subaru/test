@@ -38,8 +38,12 @@ const TRICKY_CITIES = ['四日市市', '廿日市市', '野々市市', '市原�
 const KANJI_DIGITS = { 〇: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 
 // 漢数字（〜九十九、百・千を含む）を数に。伏せ字の「〇〇」や空の文字列は null
+const KANJI_RE = new RegExp(`^(?:${'[一二三四五六七八九][〇一二三四五六七八九]*|(?=[一二三四五六七八九十百千])(?:[二三四五六七八九]?千)?(?:[二三四五六七八九]?百)?(?:[二三四五六七八九]?十)?[一二三四五六七八九]?'})$`);
+
 export function kanjiToNumber(s) {
-  if (!s || /^〇/.test(s)) return s === '〇' ? 0 : null;
+  if (s === '〇') return 0;
+  // 崩れた書き方（「十〇」「十一一」「十十」）や伏せ字は数にしない
+  if (!s || !KANJI_RE.test(s)) return null;
   if (/^[〇一二三四五六七八九]+$/.test(s) && s.length > 1) return Number([...s].map((c) => KANJI_DIGITS[c]).join(''));
   let total = 0;
   let cur = 0;
@@ -93,12 +97,15 @@ export function parseAddress(value) {
   return out;
 }
 
-// 番地の数：アラビア数字か漢数字（伏せ字の「〇」で始まるものは数とみなさない）
-const NUM = '(\\d+|[一二三四五六七八九十百千][〇一二三四五六七八九十百千]*)';
+// 番地の数：アラビア数字か、正しい書き方の漢数字だけ。
+//   位取りの書き方（一二・二〇）か、十・百・千を使う書き方（十二・二十三・百五）。
+//   「十〇」「十一一」「十十」のような崩れた書き方や、伏せ字の「〇」で始まるものは数とみなさない
+const KANJI = '[一二三四五六七八九][〇一二三四五六七八九]*|(?=[一二三四五六七八九十百千])(?:[二三四五六七八九]?千)?(?:[二三四五六七八九]?百)?(?:[二三四五六七八九]?十)?[一二三四五六七八九]?';
+const NUM = `(\\d+|${KANJI})`;
 const HY = '[-‐‑‒–—―−ー－]';
 // 番地の部分の決まった形。部分全体がどれかに一致したときだけ変える（並びは試す順）
 const BLOCKS = [
-  [new RegExp(`^${NUM}丁目${NUM}(?:番地?|${HY})${NUM}(?:号)?$`), (a, b, c) => `${a}-${b}-${c}`],
+  [new RegExp(`^${NUM}丁目${NUM}(?:番地?の?|${HY}|の)${NUM}(?:号)?$`), (a, b, c) => `${a}-${b}-${c}`],
   [new RegExp(`^${NUM}丁目${NUM}(?:番地?|号)$`), (a, b) => `${a}-${b}`],
   [new RegExp(`^${NUM}丁目$`), (a) => `${a}丁目`],
   [new RegExp(`^${NUM}番地?(?:の|${HY})?${NUM}(?:号)?$`), (a, b) => `${a}-${b}`],
@@ -109,6 +116,10 @@ const BLOCKS = [
 // 番地らしい（丁目・番・号かハイフンを含む）形。都道府県のない値を住所と判定するのに使う
 const STRUCTURED = new Set([0, 1, 2, 3, 4, 5]);
 
+const isKanji = (n) => n !== undefined && !/^\d+$/.test(n);
+// 「番」の書き方（N番N）で、漢数字とアラビア数字が区切りなしに並ぶもの（「麻布十番2」）は町名の一部の可能性が高い
+const MIXED_BAN = 3;
+
 const toNumber = (n) => (n === undefined || /^\d+$/.test(n) ? n : String(kanjiToNumber(n) ?? n));
 
 // 町名と番地を分ける：先頭から順に、そこから最初の空白までが決まった形の番地になる位置を探す
@@ -118,11 +129,17 @@ export function splitBlock(rest) {
   const tail = space < 0 ? '' : rest.slice(space);
   if (head.length > 80) return null;
   for (let i = 0; i < head.length; i++) {
-    if (!/[\d一二三四五六七八九十百千]/.test(head[i]) || /\d/.test(head[i - 1] ?? '')) continue;
+    // 数の途中（アラビア数字・漢数字の続き）からは始めない（「十一一」を「一一」から読まない）
+    if (!/[\d一二三四五六七八九十百千]/.test(head[i]) || /[\d〇一二三四五六七八九十百千]/.test(head[i - 1] ?? '')) continue;
     const block = head.slice(i);
     for (let k = 0; k < BLOCKS.length; k++) {
       const m = block.match(BLOCKS[k][0]);
-      if (m) return { town: head.slice(0, i), block, normalized: BLOCKS[k][1](...m.slice(1).map(toNumber)), structured: STRUCTURED.has(k), tail };
+      if (!m) continue;
+      if (k === MIXED_BAN && isKanji(m[1]) !== isKanji(m[2])) break; // この位置からは番地とみなさない
+      const normalized = BLOCKS[k][1](...m.slice(1).map(toNumber));
+      // 番地が完結しているか（号で終わる・3つ以上の数）。完結していれば、空白のあとの部屋番号は番地の続きではない
+      const complete = /号$/.test(block) || normalized.split('-').length >= 3;
+      return { town: head.slice(0, i), block, normalized, structured: STRUCTURED.has(k), complete, tail };
     }
   }
   return null;
@@ -132,8 +149,11 @@ export function splitBlock(rest) {
 export function normalizeBlock(rest) {
   const b = splitBlock(rest);
   if (!b) return rest;
-  // 空白のあとが数の続き（「1丁目2番 3号」「12番地 3」）なら、番地がまだ続いているので変えない
-  if (/^\s+(?:\d+|[一二三四五六七八九十百千]+)(?:号|番地?)?(?:\s|$)/.test(b.tail)) return rest;
+  // 空白のあとが「先・付近・内・外」なら、番地と一体の言葉なので変えない（「12番地 先」）
+  if (/^\s+(?:地?先|付近|地?内|外|ほか)/.test(b.tail)) return rest;
+  // 番地が完結していないのに、空白のあとが数の続き（「1丁目2番 3号」「12番地 3」「1丁目2番 3-4」）なら変えない。
+  // 完結していれば（「四丁目6番16号 301」「1-2-3 101」）、空白のあとは部屋番号などなので番地だけ揃える
+  if (!b.complete && /^\s+(?:\d+|[一二三四五六七八九十百千]+)(?:[-の]\d+)*(?:号|番地?)?(?:\s|$)/.test(b.tail)) return rest;
   return b.town + b.normalized + b.tail;
 }
 
@@ -141,7 +161,8 @@ export function normalizeBlock(rest) {
 // （「中村1」「港区みなと祭り2024」「新宿区1号店」のような名前を住所にしないため）
 function looksLikeAddress(a, hinted) {
   const b = splitBlock(a.rest);
-  if (a.prefecture) return b ? true : !!(hinted && !a.rest);
+  // 都道府県があっても、市区町村がなければ住所としない（「東京都大会2024」「北海道日本ハムファイターズ2024」）
+  if (a.prefecture) return a.city ? !!b : !!(hinted && !a.rest);
   if (!a.city || !/[市区]$/.test(a.city)) return false;
   return !!(b && b.town && b.structured);
 }
@@ -157,7 +178,8 @@ function parse(raw) {
     if (wrong && !PREFECTURES.includes(wrong[1])) return null;
   }
 
-  const rest = normalizeBlock(a.rest);
+  // 番地を揃えるのは市区町村がある場合だけ（「東京都選抜1の2」のような名前を変えない）
+  const rest = a.city ? normalizeBlock(a.rest) : a.rest;
   const join = (pref) => {
     const body = `${pref ?? ''}${a.city ?? ''}${rest}`;
     return a.postal ? `〒${a.postal} ${body}` : body;

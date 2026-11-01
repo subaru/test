@@ -213,3 +213,42 @@ test('normalize を段階ごとに呼ぶとき、規則のない種類はエラ�
 test('tidyInWorker では ruleSet を使えない', async () => {
   await assert.rejects(tidyInWorker('a\n1\n', { ruleSet: ruleSet() }), /ruleSet は使えません/);
 });
+
+// --- 3回目のレビュー ---
+
+test('住所: 「〜番」で終わる町名と、崩れた漢数字・伏せ字は変えない', () => {
+  for (const v of [
+    '東京都港区麻布十番2',
+    '東京都港区麻布十番3号',
+    '愛知県名古屋市熱田区一番2',
+    '愛知県名古屋市熱田区二番3号',
+    '東京都港区芝十〇番地',
+    '東京都港区芝三丁目十〇番',
+    '東京都港区芝五丁目十〇番十〇号',
+    '東京都港区芝十一一番地',
+    '東京都港区芝十十番地',
+    '東京都港区芝百十百番地',
+  ]) assert.equal(norm(v), v, v);
+  assert.deepEqual(['十二', '二十三', '百五', '一二', '二〇'].map(kanjiToNumber), [12, 23, 105, 12, 20]);
+  assert.deepEqual(['十〇', '十一一', '十十', '〇〇'].map(kanjiToNumber), [null, null, null, null]);
+});
+
+test('住所: 空白のあと — 「先・付近・外」と番地の続きは変えず、完結した番地のあとの部屋番号は揃える', () => {
+  for (const v of ['東京都港区芝12番地 先', '東京都港区芝12番地 付近', '東京都港区芝12番地 外', '東京都港区芝1丁目2番 3-4', '東京都港区芝1丁目2番 3の4']) {
+    assert.equal(norm(v), v, v);
+  }
+  assert.equal(norm('東京都港区芝四丁目6番16号 301'), '東京都港区芝4-6-16 301');
+  assert.equal(norm('東京都港区芝1ー2ー3 101'), '東京都港区芝1-2-3 101');
+});
+
+test('住所: 丁目のあとの「番地の」「の」を区切りとして揃える', () => {
+  assert.equal(norm('東京都港区芝2丁目3番地の4'), '東京都港区芝2-3-4');
+  assert.equal(norm('東京都港区芝三丁目二の五'), '東京都港区芝3-2-5');
+});
+
+test('住所: 都道府県のあとに市区町村がない名前（大会名・チーム名）は住所にせず、変えない', async () => {
+  const r = await tidy('大会名\n東京都大会2024\n北海道予選2023\n大阪府大会2022\n神奈川県選手権2021\n', { plugins: ['address'] });
+  assert.equal(r.schema[0].type, 'text');
+  assert.equal(addressRule.match('北海道日本ハムファイターズ2024'), false);
+  assert.equal(norm('東京都選抜1の2'), '東京都選抜1の2');
+});
