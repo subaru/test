@@ -1,5 +1,7 @@
 import { decode } from './encoding.js';
-import { parseCSV } from './csv.js';
+import { parseCSV, sniffDelimiter } from './csv.js';
+import { readHTML } from './html.js';
+import { readText } from './text.js';
 import { isZip } from './zip.js';
 import { readXLSX } from './xlsx.js';
 
@@ -55,7 +57,29 @@ async function readTable(input, options) {
     return fromRecords(Array.isArray(data) ? data : [data], meta);
   }
 
+  if (format === 'html') {
+    const table = readHTML(text, options);
+    return { ...table, meta: { ...meta, ...table.meta, source: 'html' }, warnings: [] };
+  }
+
+  // 区切り文字の表ならCSVとして読む。そうでなければ、構造のないテキストとして表を探す
+  if (format === 'text' || format === 'auto') {
+    if (!isDelimited(text, options.delimiter)) {
+      const table = readText(text, { allowExtract: true });
+      if (table) return { columns: table.columns, rows: table.rows, meta: { ...meta, source: 'text', how: table.how }, warnings: [] };
+    }
+    meta.source = 'csv';
+  }
+
   return readCSV(text, options, meta);
+}
+
+// 2列以上で、ほとんどの行の列数がそろっていれば区切り文字の表とみなす
+function isDelimited(text, delimiter) {
+  const { rows } = parseCSV(text.split(/\r?\n/).slice(0, 200).join('\n'), delimiter ?? sniffDelimiter(text));
+  if (rows.length < 2) return (rows[0]?.length ?? 0) >= 2;
+  const width = rows[0].length;
+  return width >= 2 && rows.filter((r) => r.length === width).length >= rows.length * 0.8;
 }
 
 function readCSV(text, options, meta) {
@@ -95,11 +119,16 @@ export function uniqueColumns(columns) {
   });
 }
 
+const HTML_START = /^\s*(?:<!--[\s\S]*?-->\s*)*<(?:!doctype\s+html|html|head|body|table|div|section|article|main|ul|ol|dl|p|span|h[1-6])\b/i;
+
 function guessFormat(text, name = '') {
   if (/\.json$/i.test(name)) return 'json';
-  if (/\.(csv|tsv|txt)$/i.test(name)) return 'csv';
+  if (/\.html?$/i.test(name)) return 'html';
+  if (/\.(csv|tsv)$/i.test(name)) return 'csv';
+  if (/\.txt$/i.test(name)) return 'text';
+  if (HTML_START.test(text)) return 'html';
   const head = text.trimStart()[0];
-  return head === '[' || head === '{' ? 'json' : 'csv';
+  return head === '[' || head === '{' ? 'json' : 'auto';
 }
 
 function fromRecords(records, meta) {

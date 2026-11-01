@@ -6,9 +6,9 @@
 - 実行時の依存パッケージはありません。
 - 変更はすべて記録されます。確信度の低い変換は適用せず「提案」として残します。
 
-> 開発中（v0.3.1）です。APIは変わる可能性があります。
+> 開発中（v0.4）です。APIは変わる可能性があります。
 
-## できること（v0.3）
+## できること（v0.4）
 
 | 列の種類 | 入力 → 正規化後 |
 |---|---|
@@ -62,7 +62,30 @@
 | CSV / TSV | 文字コードを自動判定（UTF-8・**Shift_JIS**・UTF-16）、区切り文字の推定、引用符内の改行 |
 | JSON | ネストは `user.name` のように平らにする。配列は `1 / 2`、オブジェクトの配列はJSON文字列にする |
 | Excel（.xlsx） | 外部ライブラリなしで読み込み。**結合セルを埋める**（縦に結合した「地域」など）、**タイトル行を飛ばして見出し行を探す**、日付・日時・時刻の書式（和暦書式を含む）のセルを変換、1904年基準のブック、ふりがな（rPh）を除去、シートの選択。LibreOfficeで保存したファイルにも対応 |
+| HTML（スクレイピング結果） | 外部ライブラリなしで解析し、次の中から**取り出せるセルが最も多いもの**を使う（下記） |
+| テキスト（.txt・貼り付けた文章） | 区切り文字の表、「項目：値」のまとまり、空白でそろえた表、文章からの抜き出し（下記） |
 | オブジェクトの配列 | そのまま（`Date` は日付の文字列にする） |
+
+#### HTMLの読み取り方
+
+| 読み取り方 | 対象 | 1行になるもの |
+|---|---|---|
+| 表 | `<table>`。`colspan`・`rowspan` を展開し、2段の見出しは `売上・上期` のようにつなぐ | 表の1行 |
+| 繰り返し構造 | 同じ形の要素の繰り返し（商品カード・店舗一覧・検索結果など）。項目名は `class`・`itemprop`・`<dt>`・`<th>`・「TEL：…」の見出しから付け、リンク先も列にする。メニューのような1項目だけの繰り返しと、全件同じ値の列（「詳しく見る」）は除く | 要素1つ |
+| 詳細ページ | ページ全体の `<dt>/<dd>`・縦の「項目｜値」の表・「項目：値」の行 | ページ全体で1行 |
+
+`<script>`・`<style>`・コメントは読み飛ばします。ページ内の表を指定するときは `table: 0`（CLIは `--table 0`）。どの読み取り方を使ったかは `result.meta.how` とレポートに出ます。
+
+#### テキストの読み取り方
+
+次の順に試し、最初に当てはまったものを使います。
+
+1. **区切り文字の表**（カンマ・タブなど。列数がそろっている）→ CSVとして読む
+2. **「項目：値」のまとまり**（フォームの通知メール・問い合わせ一覧など）。`氏名：山田`・`【氏名】山田`・`■氏名：山田` に対応。空行か、同じ項目の再登場で1件を区切り、項目のない行は直前の値の続きとする。時刻（`9:05`）や URL のコロンは区切りとみなさない
+3. **空白でそろえた表**（2つ以上の空白・全角空白・タブ）
+4. **文章からの抜き出し**：行（空行で区切ったまとまりがあればまとまり）ごとに、日付・電話番号・郵便番号・メール・URL・金額を抜き出して列にし、残りを `本文` にする
+
+1列だけの表（`金額` の下に数字が並ぶなど）は、従来どおり1列のCSVとして読みます。
 
 旧形式の `.xls` には未対応です。Excelの見出しが2段以上ある表は、最初に見つかった見出し行だけを使います（結合した見出しは `連絡先`・`連絡先_2` のようになります）。
 
@@ -85,7 +108,7 @@
 </script>
 ```
 
-デモは `examples/content.html` にあります。ES Modulesを使うため、ローカルサーバー経由で開いてください。
+デモは `examples/content.html` にあります（CSV・Excel・HTML・テキストのサンプル付き）。ES Modulesを使うため、ローカルサーバー経由で開いてください。
 
 ```sh
 python3 -m http.server 8000
@@ -118,6 +141,8 @@ JavaScriptから `element.input = file` で処理させたり、`element.result`
 ```sh
 node bin/cli.js examples/sample-sjis.csv --report report.html --out output.json
 node bin/cli.js examples/sample.xlsx --sheet 顧客一覧 --out output.csv   # CSVはBOM付き
+node bin/cli.js examples/sample-scrape.html --table 0                         # HTMLのページ内の表を選ぶ
+node bin/cli.js examples/sample-kv.txt --format text                         # 形式を指定
 node bin/cli.js data.csv --min-confidence 0.8                                # --help で一覧
 ```
 
@@ -128,7 +153,7 @@ const result = await tidy(csvText, {
   columns: { 社員コード: { type: 'text' } }, // 推論を上書き（列ごとに cluster: false も指定可）
   minConfidence: 0.9,                        // これ未満の変換は提案にとどめる
   cluster: true,                             // 表記ゆれの統一
-  // 読み込み：format（'csv'|'json'|'xlsx'）・delimiter・header（false で見出しなし）・sheet・headerRow
+  // 読み込み：format（'csv'|'json'|'xlsx'|'html'|'text'）・delimiter・header（false で見出しなし）・sheet・headerRow・table
   // 推論：threshold（既定 0.7）・hintedThreshold（列名にヒントがある場合、既定 0.5）
 });
 
@@ -158,7 +183,7 @@ result.setCanonical(0, '(株)ABC')       // 表記ゆれの統一先を選び直
 
 ```
 src/
-  read/      入力の読み込み（文字コード判定・CSV・JSON・Excel・ZIP展開）
+  read/      入力の読み込み（文字コード判定・CSV・JSON・Excel・ZIP展開・HTML・テキスト）
   rules/     日本語の正規化規則（日付・電話・郵便番号・数値…）
   detect.js  列の種類の推論
   normalize.js 正規化と変更ログ
@@ -175,7 +200,7 @@ scripts/     サンプルデータの生成
 - [x] v0.1 CSV/JSON、Shift_JIS、日付・電話・郵便番号・数値ほか、変更ログ、分析レポートHTML、表の表示
 - [x] v0.2 Excel（.xlsx、依存なし）、カード表示、Web Component（`<tidy-table>`）
 - [x] v0.3 表記ゆれの統一（「(株)ABC」「株式会社ABC」）、要確認をその場で直す画面
-- [ ] v0.4 スクレイピング結果（HTMLの表・繰り返し構造）、構造のないテキストの推論
+- [x] v0.4 スクレイピング結果（HTMLの表・繰り返し構造・詳細ページ）、構造のないテキストの推論
 - [ ] v1.0 住所の正規化プラグイン、Web Worker対応、API安定化、npm公開
 
 ## 開発

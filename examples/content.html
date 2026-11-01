@@ -16,11 +16,13 @@
 <body>
 <main>
   <h1>nihon-tidy デモ</h1>
-  <p>CSV・JSON・Excel（.xlsx）ファイルを選ぶと、ブラウザの中だけで正規化して表示します（データは外部に送信されません）。</p>
+  <p>CSV・JSON・Excel（.xlsx）・HTML（スクレイピング結果）・テキストのファイルを選ぶと、ブラウザの中だけで正規化して表示します（データは外部に送信されません）。</p>
   <div class="bar">
-    <input type="file" id="file" accept=".csv,.tsv,.txt,.json,.xlsx">
+    <input type="file" id="file" accept=".csv,.tsv,.txt,.json,.xlsx,.html,.htm">
     <button id="sample">サンプル（CSV）</button>
     <button id="sample-xlsx">サンプル（Excel）</button>
+    <button id="sample-html">サンプル（HTML）</button>
+    <button id="sample-text">サンプル（テキスト）</button>
     <select id="view" aria-label="表示形式"><option value="table">表</option><option value="cards">カード</option></select>
     <button id="report" disabled>分析レポートを開く</button>
     <span id="status"></span>
@@ -59,7 +61,7 @@
 
   function showStatus() {
     const applied = result.changes.filter((c) => c.applied).length;
-    status.textContent = `${applied}件を正規化、表記ゆれ ${result.clusters.length}組、要確認 ${result.issues.length}件（${result.meta.sheet ? `シート：${result.meta.sheet}` : `文字コード：${result.meta.encoding ?? '-'}`}）`;
+    status.textContent = `${applied}件を正規化、表記ゆれ ${result.clusters.length}組、要確認 ${result.issues.length}件（${result.meta.sheet ? `シート：${result.meta.sheet}` : `${result.meta.how ? `${result.meta.how}、` : ''}文字コード：${result.meta.encoding ?? '-'}`}）`;
   }
 
   document.getElementById('file').addEventListener('change', (e) => e.target.files[0] && load(e.target.files[0]));
@@ -70,6 +72,8 @@
   };
   document.getElementById('sample').addEventListener('click', () => loadSample('sample-sjis.csv'));
   document.getElementById('sample-xlsx').addEventListener('click', () => loadSample('sample.xlsx'));
+  document.getElementById('sample-html').addEventListener('click', () => loadSample('sample-scrape.html'));
+  document.getElementById('sample-text').addEventListener('click', () => loadSample('sample-kv.txt'));
   view.addEventListener('change', () => controller?.setView(view.value));
   reportBtn.addEventListener('click', () => {
     const url = URL.createObjectURL(new Blob([result.toReport()], { type: 'text/html' }));

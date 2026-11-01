@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="utf-8"><title>店舗一覧｜サンプル</title>
+<script>var x = "<div class='item'>not data</div>";</script>
+<style>.item { color: red }</style>
+</head>
+<body>
+<nav><ul><li><a href="/">トップ</a></li><li><a href="/shops">店舗</a></li><li><a href="/news">お知らせ</a></li><li><a href="/contact">お問い合わせ</a></li></ul></nav>
+<main>
+  <h1>店舗一覧</h1>
+  <div class="shop-list">
+    <article class="shop">
+      <h2 class="name">ＡＢＣ商店　本店</h2>
+      <p class="addr">〒100ー0001 東京都千代田区千代田1-1</p>
+      <p class="tel">TEL：０３（１２３４）５６７８</p>
+      <dl><dt>営業時間</dt><dd>10:00〜19:00</dd><dt>開店日</dt><dd>平成元年4月1日</dd></dl>
+      <span class="price">¥1,200〜</span>
+      <a href="/shops/1">詳しく見る</a>
+    </article>
+    <article class="shop">
+      <h2 class="name">(株)ＡＢＣ　大阪店</h2>
+      <p class="addr">〒530-0001 大阪府大阪市北区梅田1-1</p>
+      <p class="tel">TEL：06-1234-5678</p>
+      <dl><dt>営業時間</dt><dd>11:00〜20:00</dd><dt>開店日</dt><dd>2010/10/10</dd></dl>
+      <span class="price">¥980〜</span>
+      <a href="/shops/2">詳しく見る</a>
+    </article>
+    <article class="shop">
+      <h2 class="name">さくら商店</h2>
+      <p class="addr">〒060-0001 北海道札幌市中央区北1条西1</p>
+      <p class="tel">TEL：011-123-4567</p>
+      <dl><dt>営業時間</dt><dd>定休日あり</dd><dt>開店日</dt><dd>R2.5.1</dd></dl>
+      <span class="price">-</span>
+      <a href="/shops/3">詳しく見る</a>
+    </article>
+  </div>
+
+  <h2>売上</h2>
+  <table>
+    <thead>
+      <tr><th rowspan="2">店舗</th><th colspan="2">売上</th></tr>
+      <tr><th>上期</th><th>下期</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>本店</td><td>1,200,000</td><td>△50,000</td></tr>
+      <tr><td>大阪店</td><td>980,000</td><td>1,010,000</td></tr>
+    </tbody>
+  </table>
+</main>
+</body>
+</html>
