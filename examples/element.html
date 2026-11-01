@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tidy-table デモ</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 15px/1.6 system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px; }
+  section { margin-top: 40px; }
+  code { font-size: 13px; }
+</style>
+<!-- npm公開後は src="https://cdn.jsdelivr.net/npm/nihon-tidy/src/view/element.js"（パッケージとしては 'nihon-tidy/element'）に置き換えられる -->
+<script type="module" src="../src/view/element.js"></script>
+</head>
+<body>
+<main>
+  <h1>&lt;tidy-table&gt; デモ</h1>
+  <p>タグを1つ置くだけで、ファイルを読み込み・正規化して表示します。</p>
+
+  <section>
+    <h2>Excelをカードで表示</h2>
+    <p><code>&lt;tidy-table src="sample.xlsx" view="cards" title-column="顧客名" report-button&gt;</code></p>
+    <tidy-table src="sample.xlsx" view="cards" title-column="顧客名" report-button></tidy-table>
+  </section>
+
+  <section>
+    <h2>スクレイピング結果を住所プラグイン付きで、Web Worker で処理する</h2>
+    <p><code>&lt;tidy-table src="sample-scrape.html" plugins="address" worker&gt;</code></p>
+    <tidy-table id="html" src="sample-scrape.html" plugins="address" worker></tidy-table>
+  </section>
+
+  <section>
+    <h2>Shift_JISのCSVを表で表示し、要確認をその場で直す</h2>
+    <p><code>&lt;tidy-table src="sample-sjis.csv" review&gt;</code></p>
+    <tidy-table id="csv" src="sample-sjis.csv" review></tidy-table>
+    <p id="log"></p>
+  </section>
+</main>
+<script type="module">
+  const log = document.getElementById('log');
+  const csv = document.getElementById('csv');
+  csv.addEventListener('tidy-load', (e) => (log.textContent = `tidy-load：要確認 ${e.detail.issues.length}件`));
+  csv.addEventListener('tidy-change', (e) => (log.textContent = `tidy-change：要確認 ${e.detail.issues.length}件`));
+</script>
+</body>
+</html>
