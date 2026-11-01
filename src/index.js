@@ -2,9 +2,9 @@ import { read } from './read/index.js';
 import { detect } from './detect.js';
 import { normalize } from './normalize.js';
 import { toReport } from './report/html.js';
-import { render, toTableHTML } from './view/render.js';
+import { render, toTableHTML, toCardsHTML } from './view/render.js';
 
-export { read, detect, normalize, toReport, render, toTableHTML };
+export { read, detect, normalize, toReport, render, toTableHTML, toCardsHTML };
 export { rules } from './rules/index.js';
 
 // 読み込み → 列の種類の推論 → 正規化 をまとめて実行する
@@ -18,6 +18,7 @@ export async function tidy(input, options = {}) {
     ...result,
     toReport: (opts) => toReport(result, opts),
     toTableHTML: () => toTableHTML(result),
+    toCardsHTML: (opts) => toCardsHTML(result, opts),
     toJSON: () => data,
     toCSV: () => toCSV(result),
     render: (el, opts) => render(el, result, opts),

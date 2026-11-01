@@ -6,9 +6,9 @@
 - 実行時の依存パッケージはありません。
 - 変更はすべて記録されます。確信度の低い変換は適用せず「提案」として残します。
 
-> 開発中（v0.1）です。APIは変わる可能性があります。
+> 開発中（v0.2）です。APIは変わる可能性があります。
 
-## できること（v0.1）
+## できること（v0.2）
 
 | 列の種類 | 例 | 正規化後 |
 |---|---|---|
@@ -23,7 +23,16 @@
 
 ※ 数値と紛らわしい形式は、列名に「日」「郵便」などのヒントがある場合だけ変換します。
 
-入力は CSV / TSV（**Shift_JISを自動判定**）、JSON（ネストは `user.name` のように平らにします）、オブジェクトの配列です。
+### 入力
+
+| 形式 | 対応内容 |
+|---|---|
+| CSV / TSV | **Shift_JISを自動判定**、区切り文字の推定、引用符内の改行 |
+| JSON | ネストは `user.name` のように平らにする |
+| Excel（.xlsx） | 外部ライブラリなしで読み込み。**結合セルを埋める**（縦に結合した「地域」など）、**タイトル行を飛ばして見出し行を探す**、日付書式（和暦書式を含む）のセルを日付に変換、ふりがな（rPh）を除去、シートの選択 |
+| オブジェクトの配列 | そのまま |
+
+旧形式の `.xls` には未対応です。
 
 ## 使い方
 
@@ -37,7 +46,7 @@
   const input = document.querySelector('input[type=file]');
   input.addEventListener('change', async () => {
     const result = await tidy(input.files[0]);
-    result.render('#app');                 // 検索・並べ替えできる表で表示
+    result.render('#app', { view: 'cards' }); // 'table' | 'cards'。検索・並べ替えつき
     const reportHTML = result.toReport();  // 分析レポートHTML
   });
 </script>
@@ -50,10 +59,30 @@ python3 -m http.server 8000
 # http://localhost:8000/examples/content.html
 ```
 
+### Web Component（タグを置くだけ）
+
+```html
+<script type="module" src="./src/view/element.js"></script>
+
+<tidy-table src="customers.xlsx" view="cards" title-column="顧客名" report-button></tidy-table>
+```
+
+| 属性 | 内容 |
+|---|---|
+| `src` | 読み込むファイルのURL |
+| `view` | `table`（既定）か `cards` |
+| `title-column` | カードの見出しにする列（既定は最初のテキスト列） |
+| `sheet` | Excelのシート名か番号 |
+| `min-confidence` | これ未満の変換は提案にとどめる（既定 0.9） |
+| `report-button` | 「分析レポートを開く」ボタンを表示 |
+
+JavaScriptから `element.input = file` で処理させたり、`tidy-load` イベントで結果（`e.detail`）を受け取ったりできます。デモは `examples/element.html` です。
+
 ### Node.js / CLI
 
 ```sh
 node bin/cli.js examples/sample-sjis.csv --report report.html --out output.json
+node bin/cli.js examples/sample.xlsx --sheet 顧客一覧 --out output.csv
 ```
 
 ```js
@@ -70,6 +99,7 @@ result.changes   // { row, column, before, after, rule, note, confidence, applie
 result.issues    // 解釈できなかった値・未適用の提案
 result.toReport() // 分析レポートHTML（1ファイルで完結）
 result.toCSV()
+result.toTableHTML() / result.toCardsHTML() // 文字列のHTML（サーバー側で使う場合）
 ```
 
 段階ごとに `read` → `detect` → `normalize` → `toReport` を個別に呼ぶこともできます。
@@ -78,19 +108,20 @@ result.toCSV()
 
 ```
 src/
-  read/      入力の読み込み（文字コード判定・CSV・JSON）
+  read/      入力の読み込み（文字コード判定・CSV・JSON・Excel・ZIP展開）
   rules/     日本語の正規化規則（日付・電話・郵便番号・数値…）
   detect.js  列の種類の推論
   normalize.js 正規化と変更ログ
   report/    分析レポートHTMLの生成
-  view/      コンテンツHTML用の表示
+  view/      コンテンツHTML用の表示（表・カード・<tidy-table>）
 bin/cli.js   コマンドライン
+scripts/     サンプルデータの生成
 ```
 
 ## ロードマップ
 
 - [x] v0.1 CSV/JSON、Shift_JIS、日付・電話・郵便番号・数値ほか、変更ログ、分析レポートHTML、表の表示
-- [ ] v0.2 Excel（SheetJS）、カード表示、Web Components（`<tidy-table>`）
+- [x] v0.2 Excel（.xlsx、依存なし）、カード表示、Web Component（`<tidy-table>`）
 - [ ] v0.3 表記ゆれのクラスタリング（「(株)ABC」「株式会社ABC」）、要確認をその場で直すUI
 - [ ] v0.4 スクレイピング結果（HTMLの表・繰り返し構造）、構造のないテキストの推論
 - [ ] v1.0 住所の正規化プラグイン、Web Worker対応、API安定化、npm公開

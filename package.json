@@ -1,12 +1,13 @@
 {
   "name": "nihon-tidy",
-  "version": "0.1.0",
-  "description": "日本語データの列の種類を推論し、正規化して、変更点をHTMLレポートで返すライブラリ",
+  "version": "0.2.0",
+  "description": "日本語データ（CSV・JSON・Excel）の列の種類を推論し、正規化して、変更点をHTMLレポートで返すライブラリ",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./view": "./src/view/render.js"
+    "./view": "./src/view/render.js",
+    "./element": "./src/view/element.js"
   },
   "bin": {
     "nihon-tidy": "./bin/cli.js"
@@ -28,7 +29,8 @@
     "normalize",
     "csv",
     "wareki",
-    "report"
+    "report",
+    "excel"
   ],
   "license": "MIT"
 }

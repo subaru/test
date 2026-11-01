@@ -16,10 +16,12 @@
 <body>
 <main>
   <h1>nihon-tidy デモ</h1>
-  <p>CSV・JSONファイルを選ぶと、ブラウザの中だけで正規化して表示します（データは外部に送信されません）。</p>
+  <p>CSV・JSON・Excel（.xlsx）ファイルを選ぶと、ブラウザの中だけで正規化して表示します（データは外部に送信されません）。</p>
   <div class="bar">
-    <input type="file" id="file" accept=".csv,.tsv,.txt,.json">
-    <button id="sample">サンプルを読み込む</button>
+    <input type="file" id="file" accept=".csv,.tsv,.txt,.json,.xlsx">
+    <button id="sample">サンプル（CSV）</button>
+    <button id="sample-xlsx">サンプル（Excel）</button>
+    <select id="view" aria-label="表示形式"><option value="table">表</option><option value="cards">カード</option></select>
     <button id="report" disabled>分析レポートを開く</button>
     <span id="status"></span>
   </div>
@@ -30,24 +32,27 @@
   // npm公開後は 'https://cdn.jsdelivr.net/npm/nihon-tidy/+esm' から読み込める
   import { tidy } from '../src/index.js';
 
-  let result;
+  let result, controller;
+  const view = document.getElementById('view');
   const status = document.getElementById('status');
   const reportBtn = document.getElementById('report');
 
   async function load(input) {
     result = await tidy(input);
-    result.render('#app');
+    controller = result.render('#app', { view: view.value });
     const applied = result.changes.filter((c) => c.applied).length;
-    status.textContent = `${applied}件を正規化、要確認 ${result.issues.length}件（文字コード：${result.meta.encoding ?? '-'}）`;
+    status.textContent = `${applied}件を正規化、要確認 ${result.issues.length}件（${result.meta.sheet ? `シート：${result.meta.sheet}` : `文字コード：${result.meta.encoding ?? '-'}`}）`;
     reportBtn.disabled = false;
   }
 
   document.getElementById('file').addEventListener('change', (e) => e.target.files[0] && load(e.target.files[0]));
-  document.getElementById('sample').addEventListener('click', async () => {
-    const res = await fetch('./sample-sjis.csv');
-    const blob = await res.blob();
-    load(Object.assign(blob, { name: 'sample-sjis.csv' }));
-  });
+  const loadSample = async (name) => {
+    const blob = await (await fetch(`./${name}`)).blob();
+    load(Object.assign(blob, { name }));
+  };
+  document.getElementById('sample').addEventListener('click', () => loadSample('sample-sjis.csv'));
+  document.getElementById('sample-xlsx').addEventListener('click', () => loadSample('sample.xlsx'));
+  view.addEventListener('change', () => controller?.setView(view.value));
   reportBtn.addEventListener('click', () => {
     const url = URL.createObjectURL(new Blob([result.toReport()], { type: 'text/html' }));
     window.open(url, '_blank');

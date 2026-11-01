@@ -1,5 +1,7 @@
 import { decode } from './encoding.js';
 import { parseCSV } from './csv.js';
+import { isZip } from './zip.js';
+import { readXLSX } from './xlsx.js';
 
 // 入力（文字列 / バイト列 / File・Blob / オブジェクト配列）を表 { columns, rows, meta } に揃える。
 // rows は文字列の二次元配列。
@@ -17,7 +19,15 @@ export async function read(input, options = {}) {
       meta.name = input.name;
       bytes = await input.arrayBuffer();
     }
-    const decoded = decode(bytes);
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    if (isZip(u8) || options.format === 'xlsx') {
+      const table = await readXLSX(u8, options);
+      return { ...table, meta: { ...meta, ...table.meta } };
+    }
+    if (u8[0] === 0xd0 && u8[1] === 0xcf && u8[2] === 0x11 && u8[3] === 0xe0) {
+      throw new Error('旧形式のExcel（.xls）には未対応です。.xlsx か CSV で保存し直してください');
+    }
+    const decoded = decode(u8);
     text = decoded.text;
     meta.encoding = decoded.encoding;
   }

@@ -99,7 +99,7 @@ footer { margin-top:48px; font-size:12px; }
 <body>
 <main>
 <h1>${escape(title)}</h1>
-<p class="muted">入力：${escape(meta.name ?? meta.source ?? '')}${meta.encoding ? `（文字コード：${escape(meta.encoding)}）` : ''}</p>
+<p class="muted">入力：${escape(meta.name ?? meta.source ?? '')}${meta.encoding ? `（文字コード：${escape(meta.encoding)}）` : ''}${meta.sheet ? `（シート：${escape(meta.sheet)}、見出し：${meta.headerRow}行目、結合セル：${meta.merged}）` : ''}</p>
 
 <section class="summary">
   <div class="stat"><span class="muted">行数</span><b>${data.length}</b></div>

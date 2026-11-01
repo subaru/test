@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { tidy } from '../src/index.js';
 
-const USAGE = `使い方: nihon-tidy <入力ファイル> [--report report.html] [--out output.json|output.csv] [--min-confidence 0.9]`;
+const USAGE = `使い方: nihon-tidy <入力ファイル> [--sheet シート名|番号] [--report report.html] [--out output.json|output.csv] [--min-confidence 0.9]`;
 
 const args = process.argv.slice(2);
 const input = args.find((a, i) => !a.startsWith('--') && !args[i - 1]?.startsWith('--'));
@@ -19,10 +19,14 @@ if (!input || args.includes('--help')) {
 
 const bytes = await readFile(input);
 const file = { name: basename(input), arrayBuffer: async () => bytes };
-const minConfidence = opt('min-confidence');
-const result = await tidy(file, minConfidence ? { minConfidence: Number(minConfidence) } : {});
+const options = {};
+if (opt('min-confidence')) options.minConfidence = Number(opt('min-confidence'));
+if (opt('sheet')) options.sheet = /^\d+$/.test(opt('sheet')) ? Number(opt('sheet')) : opt('sheet');
+const result = await tidy(file, options);
 
-console.log(`${result.data.length}行 / ${result.schema.length}列（文字コード：${result.meta.encoding}）`);
+const { meta } = result;
+const source = meta.source === 'xlsx' ? `Excel：シート「${meta.sheet}」／全${meta.sheets.length}シート、結合セル${meta.merged}` : `文字コード：${meta.encoding}`;
+console.log(`${result.data.length}行 / ${result.schema.length}列（${source}）`);
 for (const c of result.schema) {
   const conf = c.type === 'text' ? '' : ` ${Math.round(c.confidence * 100)}%`;
   console.log(`  ${c.name}: ${c.label}${conf}`);
