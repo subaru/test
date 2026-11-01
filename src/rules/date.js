@@ -23,7 +23,8 @@ function toISO(y, m, d) {
 }
 
 function parse(v, ctx = {}) {
-  const s = v.replace(HYPHENS, '-');
+  // 曜日（「2024/4/1(月)」）は取り除いて読む
+  const s = v.replace(HYPHENS, '-').replace(/\s*[(（][月火水木金土日](?:曜日?)?[)）]/, '').trim();
   let m;
 
   if ((m = s.match(WESTERN))) {

@@ -59,6 +59,10 @@ if (opts.format !== undefined) {
 }
 if (opts.sheet !== undefined) options.sheet = /^\d+$/.test(opts.sheet) ? Number(opts.sheet) : opts.sheet;
 
+if (options.table !== undefined && !/\.html?$/i.test(input) && options.format !== 'html') {
+  console.error('注意: --table はHTMLの入力にだけ使われます');
+}
+
 let result;
 try {
   const bytes = await readFile(input);

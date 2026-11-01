@@ -1,6 +1,6 @@
 import { decode } from './encoding.js';
 import { parseCSV, sniffDelimiter } from './csv.js';
-import { readHTML } from './html.js';
+import { readHTML, looksLikeHTML } from './html.js';
 import { readText } from './text.js';
 import { isZip } from './zip.js';
 import { readXLSX } from './xlsx.js';
@@ -65,7 +65,7 @@ async function readTable(input, options) {
   // 区切り文字の表ならCSVとして読む。そうでなければ、構造のないテキストとして表を探す
   if (format === 'text' || format === 'auto') {
     if (!isDelimited(text, options.delimiter)) {
-      const table = readText(text, { allowExtract: true });
+      const table = readText(text);
       if (table) return { columns: table.columns, rows: table.rows, meta: { ...meta, source: 'text', how: table.how }, warnings: [] };
     }
     meta.source = 'csv';
@@ -74,12 +74,12 @@ async function readTable(input, options) {
   return readCSV(text, options, meta);
 }
 
-// 2列以上で、ほとんどの行の列数がそろっていれば区切り文字の表とみなす
+// 区切り文字が大半の行にあれば区切り文字の表とみなす。列数がそろっているかは問わない
+// （末尾の空欄を省く出力・見出しの後ろのカンマ・タイトル行があっても、従来どおりCSVとして読む）
 function isDelimited(text, delimiter) {
   const { rows } = parseCSV(text.split(/\r?\n/).slice(0, 200).join('\n'), delimiter ?? sniffDelimiter(text));
-  if (rows.length < 2) return (rows[0]?.length ?? 0) >= 2;
-  const width = rows[0].length;
-  return width >= 2 && rows.filter((r) => r.length === width).length >= rows.length * 0.8;
+  if (!rows.length) return false;
+  return rows.filter((r) => r.length >= 2).length >= rows.length * 0.6;
 }
 
 function readCSV(text, options, meta) {
@@ -119,14 +119,12 @@ export function uniqueColumns(columns) {
   });
 }
 
-const HTML_START = /^\s*(?:<!--[\s\S]*?-->\s*)*<(?:!doctype\s+html|html|head|body|table|div|section|article|main|ul|ol|dl|p|span|h[1-6])\b/i;
-
 function guessFormat(text, name = '') {
   if (/\.json$/i.test(name)) return 'json';
   if (/\.html?$/i.test(name)) return 'html';
   if (/\.(csv|tsv)$/i.test(name)) return 'csv';
   if (/\.txt$/i.test(name)) return 'text';
-  if (HTML_START.test(text)) return 'html';
+  if (looksLikeHTML(text)) return 'html';
   const head = text.trimStart()[0];
   return head === '[' || head === '{' ? 'json' : 'auto';
 }
