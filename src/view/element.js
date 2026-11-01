@@ -3,14 +3,15 @@
 //   <tidy-table src="data.xlsx" view="cards" title-column="顧客名" report-button></tidy-table>
 //
 // 属性：src / view（table|cards） / title-column / sheet / min-confidence / report-button / review（要確認を直す画面を表示）
+//       plugins（"address" など、カンマ区切り） / worker（Web Worker で処理して画面を止めない）
 // プロパティ：input（File・文字列・配列を渡すと処理する） / result（処理結果）
 // イベント：tidy-load（detail に処理結果） / tidy-change（修正のたび） / tidy-error（detail に Error）
-import { tidy } from '../index.js';
+import { tidy, tidyInWorker } from '../index.js';
 
 const Base = typeof HTMLElement === 'undefined' ? class {} : HTMLElement;
 
 export class TidyTable extends Base {
-  static observedAttributes = ['src', 'view', 'title-column', 'sheet', 'min-confidence', 'review', 'report-button'];
+  static observedAttributes = ['src', 'view', 'title-column', 'sheet', 'min-confidence', 'review', 'report-button', 'plugins', 'worker'];
 
   #input = null;
   #result = null;
@@ -74,8 +75,10 @@ export class TidyTable extends Base {
     if (sheet) options.sheet = /^\d+$/.test(sheet) ? Number(sheet) : sheet;
     const min = this.getAttribute('min-confidence');
     if (min) options.minConfidence = Number(min);
+    const plugins = this.getAttribute('plugins');
+    if (plugins) options.plugins = plugins.split(',').map((p) => p.trim()).filter(Boolean);
     try {
-      const result = await tidy(this.#input, options);
+      const result = await (this.hasAttribute('worker') ? tidyInWorker : tidy)(this.#input, options);
       if (ticket !== this.#loading) return;
       this.#result = result;
       this.#draw();

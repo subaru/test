@@ -1,10 +1,11 @@
 import { clean, PLACEHOLDERS } from './rules/common.js';
-import { ruleByType } from './rules/index.js';
+import { defaultRuleSet } from './rules/index.js';
 
 // 推論した種類に従ってセルを正規化し、すべての変更を記録する。
 // minConfidence 未満の変換は適用せず「提案」として残す。
 export function normalize(table, schema, options = {}) {
   const minConfidence = options.minConfidence ?? 0.9;
+  const { byType: ruleByType } = options.ruleSet ?? defaultRuleSet;
   const changes = [];
   const issues = [];
 

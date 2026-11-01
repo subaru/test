@@ -1,38 +1,73 @@
 {
   "name": "nihon-tidy",
-  "version": "0.4.1",
+  "version": "1.0.0",
   "description": "日本語データ（CSV・JSON・Excel・HTML・テキスト）の列の種類を推論し、正規化して、変更点をHTMLレポートで返すライブラリ",
+  "keywords": [
+    "address",
+    "csv",
+    "data-cleaning",
+    "excel",
+    "html",
+    "japanese",
+    "japanese-address",
+    "normalize",
+    "report",
+    "scraping",
+    "wareki",
+    "web-worker"
+  ],
+  "homepage": "https://github.com/subaru/test#readme",
+  "bugs": {
+    "url": "https://github.com/subaru/test/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/subaru/test.git"
+  },
+  "license": "MIT",
   "type": "module",
   "main": "./src/index.js",
+  "types": "./index.d.ts",
   "exports": {
-    ".": "./src/index.js",
-    "./view": "./src/view/render.js",
-    "./element": "./src/view/element.js"
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./address": {
+      "types": "./types/address.d.ts",
+      "default": "./src/plugins/address.js"
+    },
+    "./view": {
+      "types": "./types/view.d.ts",
+      "default": "./src/view/render.js"
+    },
+    "./element": {
+      "types": "./types/element.d.ts",
+      "default": "./src/view/element.js"
+    },
+    "./worker": "./src/worker.js",
+    "./package.json": "./package.json"
   },
   "bin": {
     "nihon-tidy": "./bin/cli.js"
   },
   "files": [
     "src",
-    "bin"
+    "bin",
+    "types",
+    "index.d.ts",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": [
+    "./src/view/element.js",
+    "./src/worker.js"
   ],
   "scripts": {
     "test": "node --test",
-    "example": "node bin/cli.js examples/sample-sjis.csv --report examples/report.html --out examples/output.json"
+    "example": "node bin/cli.js examples/sample-sjis.csv --report examples/report.html --out examples/output.json",
+    "prepublishOnly": "npm test"
   },
   "engines": {
     "node": ">=18"
-  },
-  "keywords": [
-    "japanese",
-    "data-cleaning",
-    "normalize",
-    "csv",
-    "wareki",
-    "report",
-    "excel",
-    "scraping",
-    "html"
-  ],
-  "license": "MIT"
+  }
 }

@@ -90,7 +90,9 @@ function readCSV(text, options, meta) {
   const header = options.header ?? true;
   const columns = header ? rows.shift().map((h) => cleanHeader(h)) : [];
   // 見出しより多いセルは捨てずに列を足し、要確認に挙げる（区切り文字の誤りに気づけるように）
-  const width = Math.max(columns.length, ...rows.map((r) => r.length));
+  // 行数が多いと Math.max(...配列) はスタックが溢れるので、ループで求める
+  let width = columns.length;
+  for (const r of rows) width = Math.max(width, r.length);
   const named = columns.length;
   for (let i = 0; i < width; i++) columns[i] ||= `列${i + 1}`;
   const warnings = [];

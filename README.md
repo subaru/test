@@ -6,9 +6,17 @@
 - 実行時の依存パッケージはありません。
 - 変更はすべて記録されます。確信度の低い変換は適用せず「提案」として残します。
 
-> 開発中（v0.4.1）です。APIは変わる可能性があります。
+> v1.0。公開APIは[セマンティック バージョニング](https://semver.org/lang/ja/)に従います（下記「API」）。変更履歴は [CHANGELOG.md](CHANGELOG.md)。
 
-## できること（v0.4）
+## インストール
+
+```sh
+npm install nihon-tidy
+```
+
+Node.js 18以上、または ES Modules と `DecompressionStream` に対応したブラウザで動きます。TypeScript の型定義を同梱しています。
+
+## できること
 
 | 列の種類 | 入力 → 正規化後 |
 |---|---|
@@ -54,6 +62,46 @@
 - 表記ゆれのまとまりごとに、統一後の表記を選び直す
 - 直した結果を CSV（Excelで開けるBOM付き。`=` `@` などで始まる値は数式として実行されないよう先頭に `'` を付ける）/ JSON で保存
 - 直した内容も変更ログに「手動」として残り、分析レポートに反映されます
+
+### 住所の正規化（プラグイン）
+
+```js
+import { tidy } from 'nihon-tidy';
+await tidy(file, { plugins: ['address'] }); // または import address from 'nihon-tidy/address' して plugins: [address()]
+```
+
+| 入力 → 正規化後 | 扱い |
+|---|---|
+| `東京都中央区銀座四丁目6番16号` → `東京都中央区銀座4-6-16` | 自動（丁目・番地・号・漢数字・ハイフンの統一） |
+| `〒100ー0001 東京都千代田区千代田1-1` → `〒100-0001 東京都千代田区千代田1-1` | 自動 |
+| `大阪市北区梅田1丁目1番地` → `大阪府大阪市北区梅田1-1` | **提案**（政令指定都市から都道府県を補う） |
+| `千代田区丸の内二丁目7番2号` → `東京都千代田区丸の内2-7-2` | **提案**（東京23区から補う） |
+| `港区六本木6-10-1`・`府中市宮西町2-24` | 補わない（同じ名前の区・市がほかの都市にある） |
+| `東京府千代田区1-1` | 要確認（都道府県名の誤り） |
+
+`parseAddress('三重県四日市市諏訪町1-5')` で `{ postal, prefecture, city, rest }` に分けられます（「四日市市」「廿日市市」のような名前も扱います）。辞書を持たない軽量版なので、市区町村が実在するかの確認や、全国の市町村からの都道府県の補完はしません。必要なら、辞書を持つ専用のライブラリを独自のプラグインとして組み合わせてください。
+
+### プラグイン
+
+列の種類の規則を足せます。規則は `{ type, label, hint?, minRatio?, match(value, ctx), normalize(value, ctx) }` で、`normalize` は `{ value, confidence, note }` か `null`（解釈できない）を返します。プラグインの規則は、組み込みの規則より先に試します。
+
+```js
+const sku = {
+  type: 'sku', label: '品番', hint: /品番/,
+  match: (v) => /^[a-z]{2}-?\d{4}$/i.test(v),
+  normalize: (v) => ({ value: v.toUpperCase().replace(/^([A-Z]{2})-?/, '$1-'), confidence: 1, note: '品番の書式を統一' }),
+};
+await tidy(file, { plugins: [{ name: 'sku', rules: [sku] }] });
+```
+
+### 大きなファイル（Web Worker）
+
+```js
+import { tidyInWorker } from 'nihon-tidy';
+const result = await tidyInWorker(file, { plugins: ['address'] }); // tidy と同じ結果。画面を止めない
+```
+
+`<tidy-table worker>` でも使えます。Worker が使えない環境（Node.js など）では、そのまま `tidy` を呼びます。Worker には関数を渡せないので、プラグインは名前で指定します。10万行のCSVで、メインスレッドでは処理中（約2.3秒）画面が止まりますが、Worker では止まりません。
 
 ### 入力
 
@@ -108,7 +156,7 @@
 ```html
 <div id="app"></div>
 <script type="module">
-  import { tidy } from './src/index.js';
+  import { tidy } from 'nihon-tidy'; // CDN なら 'https://cdn.jsdelivr.net/npm/nihon-tidy/+esm'
 
   const input = document.querySelector('input[type=file]');
   input.addEventListener('change', async () => {
@@ -130,8 +178,8 @@ python3 -m http.server 8000
 ### Web Component（タグを置くだけ）
 
 ```html
-<!-- npmからは import 'nihon-tidy/element' -->
-<script type="module" src="./src/view/element.js"></script>
+<script type="module">import 'nihon-tidy/element';</script>
+<!-- CDN なら <script type="module" src="https://cdn.jsdelivr.net/npm/nihon-tidy/src/view/element.js"></script> -->
 
 <tidy-table src="customers.xlsx" view="cards" title-column="顧客名" report-button></tidy-table>
 ```
@@ -145,6 +193,8 @@ python3 -m http.server 8000
 | `min-confidence` | これ未満の変換は提案にとどめる（既定 0.9） |
 | `report-button` | 「分析レポートを開く」ボタンを表示 |
 | `review` | 要確認を直す画面を表の上に表示 |
+| `plugins` | プラグイン（`address` など、カンマ区切り） |
+| `worker` | Web Worker で処理して画面を止めない |
 
 JavaScriptから `element.input = file` で処理させたり、`element.result` で結果を読んだり、`element.openReport()` でレポートを開いたりできます。イベントは `tidy-load`（読み込み完了）・`tidy-change`（修正のたび）・`tidy-error`（読み込みの失敗）で、結果やエラーは `e.detail` に入ります。デモは `examples/element.html` です。
 
@@ -155,8 +205,11 @@ node bin/cli.js examples/sample-sjis.csv --report report.html --out output.json
 node bin/cli.js examples/sample.xlsx --sheet 顧客一覧 --out output.csv   # CSVはBOM付き
 node bin/cli.js examples/sample-scrape.html --table 0                         # HTMLのページ内の表を選ぶ
 node bin/cli.js examples/sample-kv.txt --format text                         # 形式を指定
+node bin/cli.js data.csv --plugins address                                   # 住所の正規化
 node bin/cli.js data.csv --min-confidence 0.8                                # --help で一覧
 ```
+
+npm からインストールした場合は `npx nihon-tidy data.csv …` で使えます。
 
 ```js
 import { tidy } from 'nihon-tidy';
@@ -165,6 +218,7 @@ const result = await tidy(csvText, {
   columns: { 社員コード: { type: 'text' } }, // 推論を上書き（列ごとに cluster: false も指定可）
   minConfidence: 0.9,                        // これ未満の変換は提案にとどめる
   cluster: true,                             // 表記ゆれの統一
+  plugins: ['address'],                      // プラグイン
   // 読み込み：format（'csv'|'json'|'xlsx'|'html'|'text'）・delimiter・header（false で見出しなし）・sheet・headerRow・table
   // 推論：threshold（既定 0.7）・hintedThreshold（列名にヒントがある場合、既定 0.5）
 });
@@ -178,6 +232,7 @@ result.toReport() // 分析レポートHTML（1ファイルで完結）
 result.toReport({ title: '顧客データ' })   // 見出しも変えられる
 result.toCSV({ bom: true })   // safe: false で数式インジェクション対策を外す
 result.toJSON()
+result.toPlain()      // 素のオブジェクト。保存したものは hydrate(plain) で操作を付け直せる
 result.toTableHTML() / result.toCardsHTML({ titleColumn: '顧客名' }) // 文字列のHTML（サーバー側で使う場合）
 result.render(el, { view: 'table', placeholder: '検索', style: false }) // style: false で既定のCSSを入れない
 
@@ -191,6 +246,20 @@ result.setCanonical(0, '(株)ABC')       // 表記ゆれの統一先を選び直
 
 段階ごとに `read` → `detect` → `normalize` → `cluster` → `toReport` を個別に呼ぶこともできます。比較用の `fingerprint`、規則の一覧 `rules` も公開しています。
 
+## API
+
+次のものを公開APIとし、1.x の間は互換性を保ちます（型は [index.d.ts](index.d.ts)）。
+
+| 読み込み先 | 公開しているもの |
+|---|---|
+| `nihon-tidy` | `tidy`・`tidyInWorker`・`hydrate`・`read`・`detect`・`normalize`・`cluster`・`toReport`・`toCSV`・`toTableHTML`・`toCardsHTML`・`render`・`renderReview`・`fingerprint`・`rules`・`ruleSet`、処理結果のプロパティとメソッド、`TidyOptions` のオプション |
+| `nihon-tidy/address` | `address()`・`parseAddress`・`normalizeBlock`・`kanjiToNumber`・`addressRule`・`PREFECTURES` |
+| `nihon-tidy/element` | `<tidy-table>` の属性・プロパティ・イベント |
+| `nihon-tidy/view` | `render`・`toTableHTML`・`toCardsHTML` |
+| CLI | `nihon-tidy` のオプション |
+
+次のものは公開APIに含めません（マイナーバージョンでも変わることがあります）：推論・正規化の結果そのもの（判定の改善で、同じ入力でも結果が変わることがあります）、`change.note`・`issue.reason`・`meta.how` の文言、分析レポートHTMLの見た目、`src/` の中のその他のモジュール。
+
 ## 構成
 
 ```
@@ -201,9 +270,12 @@ src/
   normalize.js 正規化と変更ログ
   cluster.js 表記ゆれの統一
   fix.js     要確認の修正（fix / accept / dismiss）
+  plugins/   プラグイン（address：住所の正規化）
+  worker.js・worker-client.js  Web Worker での処理
   report/    分析レポートHTMLの生成
   view/      コンテンツHTML用の表示（表・カード・修正画面・<tidy-table>）
 bin/cli.js   コマンドライン
+index.d.ts・types/  型定義
 scripts/     サンプルデータの生成
 ```
 
@@ -213,13 +285,17 @@ scripts/     サンプルデータの生成
 - [x] v0.2 Excel（.xlsx、依存なし）、カード表示、Web Component（`<tidy-table>`）
 - [x] v0.3 表記ゆれの統一（「(株)ABC」「株式会社ABC」）、要確認をその場で直す画面
 - [x] v0.4 スクレイピング結果（HTMLの表・繰り返し構造・詳細ページ）、構造のないテキストの推論
-- [ ] v1.0 住所の正規化プラグイン、Web Worker対応、API安定化、npm公開
+- [x] v1.0 住所の正規化プラグイン、Web Worker対応、API安定化（型定義・CI）、npm公開の準備
+
+今後の候補：辞書を使う住所プラグイン（市区町村の実在確認・全国からの都道府県の補完）、EUC-JP、Excelの2段見出し、表示の仮想スクロール（数万行）
 
 ## 開発
 
 ```sh
-npm test        # node:test
-npm run example # サンプルからレポートを生成
+npm test               # node:test（CI は Node.js 18・20・22）
+npm run example        # サンプルからレポートを生成
+npm pack --dry-run     # 公開される中身の確認
+npm publish            # 公開（npm のアカウントで。publish の前に npm test が走る）
 ```
 
 ## ライセンス

@@ -1,5 +1,5 @@
 import { clean, PLACEHOLDERS } from './rules/common.js';
-import { rules, ruleByType, TEXT } from './rules/index.js';
+import { defaultRuleSet, TEXT } from './rules/index.js';
 
 // 列ごとに全件を検査し、種類と確信度（一致した割合）を推論する。
 export function detect(table, options = {}) {
@@ -7,6 +7,7 @@ export function detect(table, options = {}) {
   // 列名が種類を示している場合（「生年月日」など）は基準を下げる
   const hintedThreshold = options.hintedThreshold ?? 0.5;
   const overrides = options.columns ?? {};
+  const { list: rules, byType: ruleByType } = options.ruleSet ?? defaultRuleSet;
 
   return table.columns.map((name, ci) => {
     const values = table.rows.map((r) => clean(r[ci])).filter((v) => v !== '' && !PLACEHOLDERS.has(v));

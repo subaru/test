@@ -193,7 +193,8 @@ function tableGrid(table) {
       c += cs;
     }
   });
-  const width = Math.max(0, ...grid.map((r) => r.length));
+  let width = 0;
+  for (const r of grid) width = Math.max(width, r.length);
   return { grid: grid.map((r) => Array.from({ length: width }, (_, i) => r[i] ?? { text: '', th: false })), heads };
 }
 

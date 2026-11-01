@@ -8,12 +8,13 @@ const USAGE = `使い方: nihon-tidy <入力ファイル> [オプション]
   --sheet <名前|番号>       Excelのシートを選ぶ（既定は最初のシート）
   --table <番号>            HTMLのページ内の表を番号で選ぶ（既定は自動）
   --format <形式>           csv / json / xlsx / html / text（既定は自動判定）
+  --plugins <名前,…>        プラグインを使う（address：住所の正規化）
   --report <file.html>      分析レポートHTMLを書き出す
   --out <file.json|.csv>    正規化したデータを書き出す（CSVはExcel向けにBOM付き）
   --min-confidence <0〜1>   これ未満の変換は提案にとどめる（既定 0.9）
   --help                    この説明を表示する`;
 
-const VALUED = ['sheet', 'table', 'format', 'report', 'out', 'min-confidence'];
+const VALUED = ['sheet', 'table', 'format', 'plugins', 'report', 'out', 'min-confidence'];
 
 function fail(message) {
   console.error(`エラー: ${message}`);
@@ -57,6 +58,7 @@ if (opts.format !== undefined) {
   if (!['csv', 'json', 'xlsx', 'html', 'text'].includes(opts.format)) fail(`--format は csv / json / xlsx / html / text のどれかです：${opts.format}`);
   options.format = opts.format;
 }
+if (opts.plugins !== undefined) options.plugins = opts.plugins.split(',').map((p) => p.trim()).filter(Boolean);
 if (opts.sheet !== undefined) options.sheet = /^\d+$/.test(opts.sheet) ? Number(opts.sheet) : opts.sheet;
 
 if (options.table !== undefined && !/\.html?$/i.test(input) && options.format !== 'html') {
