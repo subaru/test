@@ -36,6 +36,8 @@ export interface TidyOptions {
   sheet?: string | number;
   /** Excel の見出し行（0 から） */
   headerRow?: number;
+  /** Excel の見出しの段数（1 以上の整数）。既定は結合セルから自動判定（縦の結合があるときだけ、最大3段） */
+  headerRows?: number;
   /** HTML のページ内の表の番号 */
   table?: number;
   /** 列ごとの指定。type で推論を上書き、cluster: false で表記ゆれの統一をしない */
@@ -109,6 +111,10 @@ export interface Meta {
   sheets?: string[];
   merged?: number;
   headerRow?: number;
+  /** Excel の見出しの段数 */
+  headerRows?: number;
+  /** Excel の見出しについての注意（2段かもしれないが判定しなかった、など） */
+  headerNote?: string;
   date1904?: boolean;
   /** HTML・テキストの読み取り方 */
   how?: string;
@@ -128,6 +134,8 @@ export interface PlainResult {
 export interface ViewController {
   refresh(): void;
   setView(view: 'table' | 'cards'): void;
+  /** 表示を消して、スクロールの監視などを止める */
+  destroy(): void;
 }
 
 export interface RenderOptions {
@@ -136,6 +144,14 @@ export interface RenderOptions {
   placeholder?: string;
   /** false で既定のCSSを入れない */
   style?: boolean;
+  /** 表の仮想スクロール。'auto'（既定：threshold 行を超えたら）・true・false */
+  virtual?: boolean | 'auto';
+  /** 仮想スクロールの表の高さ（px、既定 480） */
+  height?: number;
+  /** virtual が 'auto' のとき仮想スクロールにする行数（既定 500） */
+  threshold?: number;
+  /** カード表示で一度に描く枚数（既定 200） */
+  batch?: number;
 }
 
 export interface TidyResult extends PlainResult {

@@ -118,6 +118,12 @@ Worker が使えない場合は、メインスレッドで `tidy` を呼びま�
 
 処理時間はデータと環境によります（例：10万行×4列のCSVで数秒。Worker では結果の受け渡しの分だけ長くかかりますが、その間も画面は止まりません）。`tidyInWorker` では `ruleSet` は使えません（関数を Worker に渡せないため）。
 
+### 数万行の表示
+
+表は、行数が `threshold`（既定 500）を超えると**仮想スクロール**に切り替わります。見えている行と前後の数十行だけを描くので、数万行でも軽く動きます（例：5万行の表の最初の表示が、すべて描く場合の約2〜11秒（環境による）から約0.1秒に）。見出しは上に固定され、列の幅は全体のデータから一度だけ決めるので、スクロール・並べ替え・検索で変わりません（幅に収まらないセルは「…」で切り、全文を `title` に出します）。検索で件数が減っても、全体の行数で仮想スクロールにしたまま表示します。行の高さは1行目に合わせるので、セルを折り返すCSS（`white-space: normal`）とは併用しないでください。表の高さは `height`（既定 480px、`<tidy-table height="600">`）。`virtual: false` で常にすべて描き、`virtual: true` で行数に関係なく仮想スクロールにします。
+
+カード表示は `batch`（既定 200）枚ずつ描き、下までスクロールすると次を足します。行数が多いときの検索は、入力が止まってから行います。
+
 ### 入力
 
 | 形式 | 対応内容 |
@@ -162,7 +168,14 @@ Worker が使えない場合は、メインスレッドで `tidy` を呼びま�
 
 どれにも当てはまらないもの（1列だけの表など）は、従来どおり1列のCSVとして読みます。長い行でも処理時間が行の長さに比例するようにしています。
 
-旧形式の `.xls` には未対応です。Excelの見出しが2段以上ある表は、最初に見つかった見出し行だけを使います（結合した見出しは `連絡先`・`連絡先_2` のようになります）。
+旧形式の `.xls` には未対応です。
+
+**Excel の複数段の見出し**：次の条件がそろうと、`売上・上期` のようにつないで1つの列名にします（最大3段）。データの行を見出しとして飲み込まないよう、判定は控えめです。
+- 見出し行から次の行へ縦に結合したセルがある（「店舗」が2段にまたがる）
+- 横にまたがるセル（結合、または同じ値の並び）の下に、互いに違う小見出しが並ぶ（数・日付・電話番号・メールなどデータらしい値はない）
+- ほかの列は、縦の結合か、上が空で下が小見出しか、下が空
+
+縦の結合がない表（「店舗」を2段目にだけ書いた表など）は1段として読み、`meta.headerNote` に「2段かもしれません」と残します（レポートとCLIにも出ます）。そのときは `headerRows: 2` で段数を指定してください（1以上の整数。結果の `meta.headerRows` で分かります）。
 
 ## 使い方
 
@@ -210,6 +223,7 @@ python3 -m http.server 8000
 | `review` | 要確認を直す画面を表の上に表示 |
 | `plugins` | プラグイン（`address` など、カンマ区切り） |
 | `worker` | Web Worker で処理して画面を止めない |
+| `height` | 数万行の表を仮想スクロールで表示するときの高さ（px） |
 
 JavaScriptから `element.input = file` で処理させたり、`element.result` で結果を読んだり、`element.openReport()` でレポートを開いたりできます。イベントは `tidy-load`（読み込み完了）・`tidy-change`（修正のたび）・`tidy-error`（読み込みの失敗）で、結果やエラーは `e.detail` に入ります。デモは `examples/element.html` です。
 
@@ -234,7 +248,7 @@ const result = await tidy(csvText, {
   minConfidence: 0.9,                        // これ未満の変換は提案にとどめる
   cluster: true,                             // 表記ゆれの統一
   plugins: ['address'],                      // プラグイン
-  // 読み込み：format（'csv'|'json'|'xlsx'|'html'|'text'）・delimiter・header（false で見出しなし）・sheet・headerRow・table
+  // 読み込み：format（'csv'|'json'|'xlsx'|'html'|'text'）・delimiter・header（false で見出しなし）・sheet・headerRow・headerRows・table
   // 推論：threshold（既定 0.7）・hintedThreshold（列名にヒントがある場合、既定 0.5）
 });
 
@@ -250,6 +264,7 @@ result.toJSON()
 result.toPlain()      // その時点の写し（素のオブジェクト）。保存したものは hydrate(plain) で操作を付け直せる（hydrate は配列をコピーせず共有する）
 result.toTableHTML() / result.toCardsHTML({ titleColumn: '顧客名' }) // 文字列のHTML（サーバー側で使う場合）
 result.render(el, { view: 'table', placeholder: '検索', style: false }) // style: false で既定のCSSを入れない
+result.render(el, { virtual: 'auto', height: 480, threshold: 500, batch: 200 }) // 数万行の表示（下記）。戻り値の destroy() で表示を消す
 
 // 修正（Node.jsでも使える）。fix・accept・setCanonical は変更ログに残る
 result.fix(row, '登録日', '2024-04-02') // 任意の値に直す
@@ -303,8 +318,9 @@ scripts/     サンプルデータの生成
 - [x] v0.3 表記ゆれの統一（「(株)ABC」「株式会社ABC」）、要確認をその場で直す画面
 - [x] v0.4 スクレイピング結果（HTMLの表・繰り返し構造・詳細ページ）、構造のないテキストの推論
 - [x] v1.0 住所の正規化プラグイン、Web Worker対応、API安定化（型定義・CI）、npm公開の準備
+- [x] v1.1 Excelの複数段の見出し、数万行の表示（仮想スクロール）
 
-今後の候補：辞書を使う住所プラグイン（市区町村の実在確認・全国からの都道府県の補完）、EUC-JP、Excelの2段見出し、表示の仮想スクロール（数万行）
+今後の候補：辞書を使う住所プラグイン（市区町村の実在確認・全国からの都道府県の補完）、EUC-JP
 
 ## 開発
 
