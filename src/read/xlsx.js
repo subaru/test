@@ -84,6 +84,7 @@ export function serialToISO(n, kind = 'date', date1904 = false) {
 export function parseSheet(xml, shared, dateStyles, date1904 = false) {
   const grid = [];
   let merged = 0;
+  const merges = [];
   let nextRow = 0;
 
   for (const row of xml.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
@@ -118,6 +119,7 @@ export function parseSheet(xml, shared, dateStyles, date1904 = false) {
     const value = grid[r1]?.[c1];
     if (value === undefined) continue;
     merged++;
+    merges.push({ r1, c1, r2, c2 });
     for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) (grid[r] ??= [])[c] = value;
   }
 
@@ -125,7 +127,7 @@ export function parseSheet(xml, shared, dateStyles, date1904 = false) {
   let width = 0;
   for (let i = 0; i < grid.length; i++) width = Math.max(width, grid[i]?.length ?? 0);
   const rows = Array.from({ length: grid.length }, (_, i) => Array.from({ length: width }, (_, c) => grid[i]?.[c] ?? ''));
-  return { rows, merged };
+  return { rows, merged, merges };
 }
 
 // 見出し行を探す：空行と、結合したタイトル行（値が1種類しかない行）を飛ばす
@@ -136,6 +138,46 @@ function findHeader(rows) {
   return rows.findIndex((r) => {
     const vals = r.filter((v) => v !== '');
     return vals.length >= Math.max(2, width * 0.5) && new Set(vals).size > 1;
+  });
+}
+
+// 見出しが何段か：見出し行に横に結合したセル（「売上」が「上期・下期」の上にまたがる）か、
+// 次の行へ縦に結合したセル（「店舗」が2段にまたがる）があり、次の行が見出しらしい（数や日付がない）なら2段目とみなす
+const DATA_LIKE = /^[-+(△▲¥￥]?[\d,.]+%?\)?$|^\d{4}[-/年.]\d{1,2}|^(?:TRUE|FALSE)$/i;
+
+export function headerDepth(rows, h, merges = [], max = 3) {
+  let depth = 1;
+  while (depth < max) {
+    const r = h + depth - 1;
+    const next = rows[r + 1];
+    if (!next) break;
+    const top = rows[r];
+    // 横にまたがる列（結合セル、または同じ値が隣に続く列）
+    const spanned = new Set();
+    for (const m of merges) if (m.r1 <= r && m.r2 >= r && m.c2 > m.c1) for (let c = m.c1; c <= m.c2; c++) spanned.add(c);
+    top.forEach((v, c) => {
+      if (v !== '' && (v === top[c - 1] || v === top[c + 1])) spanned.add(c);
+    });
+    if (!spanned.size) break;
+    // 2段目の見出しなら：またがる列の下には小見出しがあり、それ以外の列は空か、縦の結合で上と同じ値。
+    // データの行はどの列にも値があるので、ここで見分ける
+    const subOk = [...spanned].every((c) => (next[c] ?? '') !== '' && !DATA_LIKE.test(next[c].trim()));
+    const restOk = top.every((v, c) => spanned.has(c) || (next[c] ?? '') === '' || next[c] === v);
+    if (!subOk || !restOk) break;
+    depth++;
+  }
+  return depth;
+}
+
+// 複数段の見出しを「売上・上期」のようにつなぐ（同じ値が続く段は1つにまとめる）
+function joinHeader(rows, h, depth, width) {
+  return Array.from({ length: width }, (_, c) => {
+    const parts = [];
+    for (let r = h; r < h + depth; r++) {
+      const v = (rows[r][c] ?? '').trim();
+      if (v && parts.at(-1) !== v) parts.push(v);
+    }
+    return parts.join('・') || `列${c + 1}`;
   });
 }
 
@@ -160,16 +202,18 @@ export async function readXLSX(u8, options = {}) {
   const shared = parseSharedStrings((await text('xl/sharedStrings.xml')) ?? '');
   const dateStyles = parseDateStyles(await text('xl/styles.xml'));
   const date1904 = /<workbookPr\b[^>]*\bdate1904="(1|true)"/.test(workbook);
-  const { rows, merged } = parseSheet((await text(sheet.path)) ?? '', shared, dateStyles, date1904);
+  const { rows, merged, merges } = parseSheet((await text(sheet.path)) ?? '', shared, dateStyles, date1904);
 
   const h = options.header === false ? -1 : (options.headerRow ?? findHeader(rows));
   const width = rows[0]?.length ?? 0;
-  const columns = h >= 0 ? rows[h].map((v, i) => v.trim() || `列${i + 1}`) : Array.from({ length: width }, (_, i) => `列${i + 1}`);
-  const body = rows.slice(h + 1).filter((r) => r.some((v) => v !== ''));
+  // 見出しの段数：headerRows で指定するか、結合セルから判定する
+  const depth = h < 0 ? 0 : Math.max(1, Math.min(options.headerRows ?? headerDepth(rows, h, merges), rows.length - h));
+  const columns = h >= 0 ? joinHeader(rows, h, depth, width) : Array.from({ length: width }, (_, i) => `列${i + 1}`);
+  const body = rows.slice(h + Math.max(depth, 1)).filter((r) => r.some((v) => v !== ''));
 
   return {
     columns,
     rows: body,
-    meta: { source: 'xlsx', sheet: sheet.name, sheets: sheets.map((s) => s.name), merged, headerRow: h + 1, date1904 },
+    meta: { source: 'xlsx', sheet: sheet.name, sheets: sheets.map((s) => s.name), merged, headerRow: h + 1, headerRows: depth, date1904 },
   };
 }

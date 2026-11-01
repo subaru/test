@@ -1,6 +1,6 @@
 {
   "name": "nihon-tidy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "日本語データ（CSV・JSON・Excel・HTML・テキスト）の列の種類を推論し、正規化して、変更点をHTMLレポートで返すライブラリ",
   "keywords": [
     "address",

@@ -4,6 +4,7 @@
 //
 // 属性：src / view（table|cards） / title-column / sheet / min-confidence / report-button / review（要確認を直す画面を表示）
 //       plugins（"address" など、カンマ区切り） / worker（Web Worker で処理して画面を止めない）
+//       height（数万行の表を仮想スクロールで表示するときの高さ、px）
 // プロパティ：input（File・文字列・配列を渡すと処理する） / result（処理結果）
 // イベント：tidy-load（detail に処理結果） / tidy-change（修正のたび） / tidy-error（detail に Error）
 import { tidy, tidyInWorker } from '../index.js';
@@ -11,7 +12,7 @@ import { tidy, tidyInWorker } from '../index.js';
 const Base = typeof HTMLElement === 'undefined' ? class {} : HTMLElement;
 
 export class TidyTable extends Base {
-  static observedAttributes = ['src', 'view', 'title-column', 'sheet', 'min-confidence', 'review', 'report-button', 'plugins', 'worker'];
+  static observedAttributes = ['src', 'view', 'title-column', 'sheet', 'min-confidence', 'review', 'report-button', 'plugins', 'worker', 'height'];
 
   #input = null;
   #result = null;
@@ -46,7 +47,7 @@ export class TidyTable extends Base {
     if (!this.isConnected || oldValue === newValue) return;
     if (name === 'src') this.#fetch();
     else if (name === 'view' && this.#controller) this.#controller.setView(newValue || 'table');
-    else if (name === 'title-column' || name === 'review' || name === 'report-button') this.#draw();
+    else if (name === 'title-column' || name === 'review' || name === 'report-button' || name === 'height') this.#draw();
     else this.#load();
   }
 
@@ -106,6 +107,7 @@ export class TidyTable extends Base {
     this.#controller = this.#result.render(view, {
       view: this.getAttribute('view') || 'table',
       titleColumn: this.getAttribute('title-column') || undefined,
+      height: Number(this.getAttribute('height')) || undefined,
     });
     if (this.hasAttribute('report-button')) {
       const button = document.createElement('button');
