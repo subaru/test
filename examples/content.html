@@ -25,6 +25,7 @@
     <button id="report" disabled>分析レポートを開く</button>
     <span id="status"></span>
   </div>
+  <div id="review"></div>
   <div id="app"></div>
 </main>
 
@@ -40,9 +41,15 @@
   async function load(input) {
     result = await tidy(input);
     controller = result.render('#app', { view: view.value });
-    const applied = result.changes.filter((c) => c.applied).length;
-    status.textContent = `${applied}件を正規化、要確認 ${result.issues.length}件（${result.meta.sheet ? `シート：${result.meta.sheet}` : `文字コード：${result.meta.encoding ?? '-'}`}）`;
+    // 要確認を直すと、表示も変更ログもその場で更新される
+    result.renderReview('#review', { onChange: () => { controller.refresh(); showStatus(); } });
+    showStatus();
     reportBtn.disabled = false;
+  }
+
+  function showStatus() {
+    const applied = result.changes.filter((c) => c.applied).length;
+    status.textContent = `${applied}件を正規化、表記ゆれ ${result.clusters.length}組、要確認 ${result.issues.length}件（${result.meta.sheet ? `シート：${result.meta.sheet}` : `文字コード：${result.meta.encoding ?? '-'}`}）`;
   }
 
   document.getElementById('file').addEventListener('change', (e) => e.target.files[0] && load(e.target.files[0]));

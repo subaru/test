@@ -43,13 +43,15 @@ export function toReport(result, options = {}) {
   const title = options.title ?? 'nihon-tidy 分析レポート';
   const applied = changes.filter((c) => c.applied).length;
   const rules = [...new Set(changes.map((c) => c.rule))];
-  const ruleLabel = (r) => (r === 'common' ? '表記の統一' : schema.find((s) => s.type === r)?.label ?? r);
+  const clusters = result.clusters ?? [];
+  const RULES = { common: '全角・半角・空白', cluster: '表記ゆれ', manual: '手動の修正' };
+  const ruleLabel = (r) => RULES[r] ?? schema.find((s) => s.type === r)?.label ?? r;
 
   const changeRows = changes
     .slice(0, MAX_ROWS)
     .map(
       (c) => `<tr data-col="${escape(c.column)}" data-rule="${escape(c.rule)}" class="${c.applied ? '' : 'pending'}">
-<td class="num">${c.row + 1}</td><td>${escape(c.column)}</td><td class="before">${shown(c.before)}</td><td class="after">${shown(c.after)}</td><td>${escape(c.note)}</td><td class="num">${pct(c.confidence)}</td><td>${c.applied ? '適用' : '提案'}</td></tr>`,
+<td class="num">${c.row + 1}</td><td>${escape(c.column)}</td><td class="before">${shown(c.before)}</td><td class="after">${shown(c.after)}</td><td>${escape(c.note)}</td><td class="num">${pct(c.confidence)}</td><td>${c.applied ? (c.rule === 'manual' ? '手動' : '適用') : c.dismissed ? '見送り' : '提案'}</td></tr>`,
     )
     .join('\n');
 
@@ -106,6 +108,7 @@ footer { margin-top:48px; font-size:12px; }
   <div class="stat"><span class="muted">列数</span><b>${schema.length}</b></div>
   <div class="stat"><span class="muted">適用した変更</span><b>${applied}</b></div>
   <div class="stat"><span class="muted">提案（未適用）</span><b>${changes.length - applied}</b></div>
+  <div class="stat"><span class="muted">表記ゆれ</span><b>${clusters.length}組</b></div>
   <div class="stat"><span class="muted">要確認</span><b>${issues.length}</b></div>
 </section>
 
@@ -127,6 +130,21 @@ ${
 ${changeRows}
 </tbody></table></div>${more(changes)}`
     : '<p class="muted">変更はありません。</p>'
+}
+
+<h2>表記ゆれ</h2>
+${
+  clusters.length
+    ? `<div class="scroll"><table>
+<thead><tr><th>列</th><th>統一後</th><th>まとめた表記（件数）</th><th>状態</th></tr></thead>
+<tbody>
+${clusters
+  .map(
+    (c) => `<tr><td>${escape(c.column)}</td><td>${escape(c.canonical)}</td><td>${c.variants.map((v) => `${escape(v.value)}（${v.count}）`).join('、')}</td><td>${c.applied ? '統一' : '提案（前株・後株などの違い）'}</td></tr>`,
+  )
+  .join('\n')}
+</tbody></table></div>`
+    : '<p class="muted">表記ゆれは見つかりませんでした。</p>'
 }
 
 <h2>要確認</h2>

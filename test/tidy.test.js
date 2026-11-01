@@ -8,7 +8,7 @@ test('Shift_JISのCSVを判定して読み込む', async () => {
   const table = await read(bytes);
   assert.equal(table.meta.encoding, 'shift_jis');
   assert.equal(table.columns[0], '顧客名');
-  assert.equal(table.rows.length, 6);
+  assert.equal(table.rows.length, 10);
 });
 
 test('CSV: 引用符内のカンマと改行', async () => {

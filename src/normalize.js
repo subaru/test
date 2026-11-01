@@ -31,7 +31,7 @@ export function normalize(table, schema, options = {}) {
           if (applied && last && last.row === ri && last.column === col.name) changes.pop();
           changes.push({ row: ri, column: col.name, before: raw, after: r.value, rule: col.type, note: r.note, confidence: r.confidence, applied });
           if (applied) value = r.value;
-          else issues.push({ row: ri, column: col.name, value: raw, reason: `確信度が低いため未適用（提案: ${r.value}）` });
+          else issues.push({ row: ri, column: col.name, value: raw, reason: `確信度が低いため未適用（提案: ${r.value}）`, suggestion: r.value });
         } else {
           value = r.value;
         }

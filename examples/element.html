@@ -26,16 +26,17 @@
   </section>
 
   <section>
-    <h2>Shift_JISのCSVを表で表示</h2>
-    <p><code>&lt;tidy-table src="sample-sjis.csv"&gt;</code></p>
-    <tidy-table id="csv" src="sample-sjis.csv"></tidy-table>
+    <h2>Shift_JISのCSVを表で表示し、要確認をその場で直す</h2>
+    <p><code>&lt;tidy-table src="sample-sjis.csv" review&gt;</code></p>
+    <tidy-table id="csv" src="sample-sjis.csv" review></tidy-table>
     <p id="log"></p>
   </section>
 </main>
 <script type="module">
-  document.getElementById('csv').addEventListener('tidy-load', (e) => {
-    document.getElementById('log').textContent = `tidy-load：要確認 ${e.detail.issues.length}件`;
-  });
+  const log = document.getElementById('log');
+  const csv = document.getElementById('csv');
+  csv.addEventListener('tidy-load', (e) => (log.textContent = `tidy-load：要確認 ${e.detail.issues.length}件`));
+  csv.addEventListener('tidy-change', (e) => (log.textContent = `tidy-change：要確認 ${e.detail.issues.length}件`));
 </script>
 </body>
 </html>

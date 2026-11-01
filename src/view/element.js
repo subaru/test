@@ -2,15 +2,15 @@
 //
 //   <tidy-table src="data.xlsx" view="cards" title-column="顧客名" report-button></tidy-table>
 //
-// 属性：src / view（table|cards） / title-column / sheet / min-confidence / report-button
+// 属性：src / view（table|cards） / title-column / sheet / min-confidence / report-button / review（要確認を直す画面を表示）
 // プロパティ：input（File・文字列・配列を渡すと処理する） / result（処理結果）
-// イベント：tidy-load（detail に処理結果） / tidy-error（detail に Error）
+// イベント：tidy-load（detail に処理結果） / tidy-change（修正のたび） / tidy-error（detail に Error）
 import { tidy } from '../index.js';
 
 const Base = typeof HTMLElement === 'undefined' ? class {} : HTMLElement;
 
 export class TidyTable extends Base {
-  static observedAttributes = ['src', 'view', 'title-column', 'sheet', 'min-confidence'];
+  static observedAttributes = ['src', 'view', 'title-column', 'sheet', 'min-confidence', 'review'];
 
   #input = null;
   #result = null;
@@ -38,7 +38,7 @@ export class TidyTable extends Base {
     if (!this.isConnected || oldValue === newValue) return;
     if (name === 'src') this.#fetch();
     else if (name === 'view' && this.#controller) this.#controller.setView(newValue || 'table');
-    else if (name === 'title-column') this.#draw();
+    else if (name === 'title-column' || name === 'review') this.#draw();
     else this.#load();
   }
 
@@ -77,7 +77,20 @@ export class TidyTable extends Base {
 
   #draw() {
     if (!this.#result) return;
-    this.#controller = this.#result.render(this, {
+    this.replaceChildren();
+    const view = document.createElement('div');
+    if (this.hasAttribute('review')) {
+      const panel = document.createElement('div');
+      this.append(panel);
+      this.#result.renderReview(panel, {
+        onChange: (result) => {
+          this.#controller?.refresh();
+          this.dispatchEvent(new CustomEvent('tidy-change', { detail: result }));
+        },
+      });
+    }
+    this.append(view);
+    this.#controller = this.#result.render(view, {
       view: this.getAttribute('view') || 'table',
       titleColumn: this.getAttribute('title-column') || undefined,
     });
@@ -87,7 +100,7 @@ export class TidyTable extends Base {
       button.textContent = '分析レポートを開く';
       button.style.cssText = 'font:inherit;margin-left:auto';
       button.addEventListener('click', () => this.openReport());
-      this.querySelector('.tidy-bar')?.append(button);
+      view.querySelector('.tidy-bar')?.append(button);
     }
   }
 
