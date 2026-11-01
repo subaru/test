@@ -5,7 +5,18 @@ export function isZip(u8) {
 }
 
 async function inflateRaw(data) {
-  const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  let ds;
+  try {
+    ds = new DecompressionStream('deflate-raw');
+  } catch (error) {
+    // Node.js 20.12 より前の DecompressionStream は 'deflate-raw' に対応していないので、zlib で展開する
+    if (typeof process !== 'undefined' && process.versions?.node) {
+      const { inflateRawSync } = await import(/* webpackIgnore: true */ 'node:zlib');
+      return new Uint8Array(inflateRawSync(data));
+    }
+    throw new Error(`この環境は .xlsx の展開（deflate-raw）に対応していません：${error.message}`);
+  }
+  const stream = new Blob([data]).stream().pipeThrough(ds);
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
