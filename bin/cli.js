@@ -80,6 +80,7 @@ const source =
     ? `Excel・シート「${meta.sheet}」（全${meta.sheets.length}シート）、結合セル${meta.merged}`
     : `${meta.how ? `${meta.how}、` : ''}文字コード：${meta.encoding ?? '-'}`;
 console.log(`${result.data.length}行 / ${result.schema.length}列（${source}）`);
+if (meta.headerNote) console.log(`注意: ${meta.headerNote}`);
 for (const c of result.schema) {
   const conf = c.type === 'text' ? '' : ` ${Math.round(c.confidence * 100)}%`;
   console.log(`  ${c.name}: ${c.label}${conf}`);

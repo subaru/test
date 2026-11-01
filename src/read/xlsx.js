@@ -1,5 +1,6 @@
 // Excel（.xlsx）の読み込み。共有文字列・日付書式・結合セル・複数シートに対応する。
 import { unzip } from './zip.js';
+import { ruleByType } from '../rules/index.js';
 
 const utf8 = new TextDecoder();
 
@@ -141,29 +142,65 @@ function findHeader(rows) {
   });
 }
 
-// 見出しが何段か：見出し行に横に結合したセル（「売上」が「上期・下期」の上にまたがる）か、
-// 次の行へ縦に結合したセル（「店舗」が2段にまたがる）があり、次の行が見出しらしい（数や日付がない）なら2段目とみなす
-const DATA_LIKE = /^[-+(△▲¥￥]?[\d,.]+%?\)?$|^\d{4}[-/年.]\d{1,2}|^(?:TRUE|FALSE)$/i;
+// 見出しが何段か。データの行を見出しとして飲み込むのが一番困るので、証拠がそろったときだけ2段目とみなす：
+//   ・見出し行から次の行へ縦に結合したセルがある（「店舗」が2段にまたがる）
+//   ・見出し行に横にまたがるセル（結合、または同じ値の並び）があり、その下に小見出しが並ぶ
+//     （空でなく、数・日付・電話番号などデータらしい値でなく、同じ範囲の中で互いに違う値）
+//   ・それ以外の列は、縦の結合か、上が空で下が小見出しらしい値か、下が空
+// 縦の結合がなく、ほかの条件だけそろうときは判定せず、info.maybe に段数の候補を入れる（headerRows で指定してもらう）
 
-export function headerDepth(rows, h, merges = [], max = 3) {
+const DATA_LIKE = /^[-+(△▲¥￥]?[\d,.]+%?\)?$|^\d{4}[-/年.]\d{1,2}|^(?:TRUE|FALSE)$/i;
+const DATA_RULES = ['date', 'phone', 'postal', 'email', 'number', 'boolean'];
+
+function dataLike(value) {
+  const v = value.normalize('NFKC').trim();
+  return DATA_LIKE.test(v) || /\d{1,2}:\d{2}/.test(v) || DATA_RULES.some((t) => ruleByType[t].match(v, { hinted: false }));
+}
+
+export function headerDepth(rows, h, merges = [], max = 3, info = {}) {
   let depth = 1;
   while (depth < max) {
     const r = h + depth - 1;
-    const next = rows[r + 1];
-    if (!next) break;
     const top = rows[r];
-    // 横にまたがる列（結合セル、または同じ値が隣に続く列）
-    const spanned = new Set();
-    for (const m of merges) if (m.r1 <= r && m.r2 >= r && m.c2 > m.c1) for (let c = m.c1; c <= m.c2; c++) spanned.add(c);
-    top.forEach((v, c) => {
-      if (v !== '' && (v === top[c - 1] || v === top[c + 1])) spanned.add(c);
-    });
-    if (!spanned.size) break;
-    // 2段目の見出しなら：またがる列の下には小見出しがあり、それ以外の列は空か、縦の結合で上と同じ値。
-    // データの行はどの列にも値があるので、ここで見分ける
-    const subOk = [...spanned].every((c) => (next[c] ?? '') !== '' && !DATA_LIKE.test(next[c].trim()));
-    const restOk = top.every((v, c) => spanned.has(c) || (next[c] ?? '') === '' || next[c] === v);
-    if (!subOk || !restOk) break;
+    const next = rows[r + 1];
+    if (!top || !next) break;
+    const empty = (c) => (next[c] ?? '') === '';
+    // 次の行へ縦に結合した列
+    const vertical = new Set();
+    for (const m of merges) if (m.r1 <= r && m.r2 >= r + 1) for (let c = m.c1; c <= m.c2; c++) vertical.add(c);
+    // 横にまたがる範囲（縦にも結合した範囲は除く）。下がすべて空の範囲は表の外の注記などとみなして無視する
+    const groups = [];
+    for (const m of merges) if (m.r1 <= r && m.r2 === r && m.c2 > m.c1) groups.push([m.c1, m.c2]);
+    for (let c = 0; c < top.length; c++) {
+      if (top[c] === '' || top[c] !== top[c + 1] || vertical.has(c) || groups.some(([a, b]) => c >= a && c <= b)) continue;
+      let e = c + 1;
+      while (top[e + 1] === top[c] && !vertical.has(e + 1)) e++;
+      groups.push([c, e]);
+      c = e;
+    }
+    const used = groups.filter(([a, b]) => Array.from({ length: b - a + 1 }, (_, i) => a + i).some((c) => !empty(c)));
+    if (!used.length) break;
+    const inGroup = new Set();
+    let ok = true;
+    // 次の行で横に結合したセルは1つの小見出しとして数える
+    const sameCell = (c) => merges.some((m) => m.r1 <= r + 1 && m.r2 >= r + 1 && m.c1 < c && m.c2 >= c);
+    for (const [a, b] of used) {
+      const subs = [];
+      for (let c = a; c <= b; c++) {
+        inGroup.add(c);
+        if (!sameCell(c) || c === a) subs.push(next[c] ?? '');
+      }
+      if (subs.length < 2 || subs.some((v) => v === '' || dataLike(v)) || new Set(subs).size !== subs.length) ok = false;
+    }
+    for (let c = 0; c < top.length && ok; c++) {
+      if (inGroup.has(c) || vertical.has(c) || empty(c)) continue;
+      if (top[c] !== '' || dataLike(next[c])) ok = false;
+    }
+    if (!ok) break;
+    if (!vertical.size) {
+      info.maybe = depth + 1;
+      break;
+    }
     depth++;
   }
   return depth;
@@ -207,13 +244,27 @@ export async function readXLSX(u8, options = {}) {
   const h = options.header === false ? -1 : (options.headerRow ?? findHeader(rows));
   const width = rows[0]?.length ?? 0;
   // 見出しの段数：headerRows で指定するか、結合セルから判定する
-  const depth = h < 0 ? 0 : Math.max(1, Math.min(options.headerRows ?? headerDepth(rows, h, merges), rows.length - h));
+  const info = {};
+  let depth = 0;
+  let headerNote;
+  if (h >= 0) {
+    const want = options.headerRows;
+    if (want !== undefined && want !== null && !(Number.isInteger(+want) && +want >= 1)) {
+      throw new TypeError(`headerRows は 1 以上の整数で指定してください：${want}`);
+    }
+    depth = want !== undefined && want !== null ? +want : headerDepth(rows, h, merges, 3, info);
+    if (depth > rows.length - h) {
+      headerNote = `headerRows（${depth}）が見出しから下の行数より多いため、${rows.length - h}段にしました`;
+      depth = rows.length - h;
+    }
+    if (info.maybe) headerNote = `見出しが${info.maybe}段かもしれません（縦の結合がないため1段として読みました）。headerRows: ${info.maybe} で指定できます`;
+  }
   const columns = h >= 0 ? joinHeader(rows, h, depth, width) : Array.from({ length: width }, (_, i) => `列${i + 1}`);
   const body = rows.slice(h + Math.max(depth, 1)).filter((r) => r.some((v) => v !== ''));
 
   return {
     columns,
     rows: body,
-    meta: { source: 'xlsx', sheet: sheet.name, sheets: sheets.map((s) => s.name), merged, headerRow: h + 1, headerRows: depth, date1904 },
+    meta: { source: 'xlsx', sheet: sheet.name, sheets: sheets.map((s) => s.name), merged, headerRow: h + 1, headerRows: depth, ...(headerNote && { headerNote }), date1904 },
   };
 }

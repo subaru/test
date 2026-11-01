@@ -36,7 +36,7 @@ export interface TidyOptions {
   sheet?: string | number;
   /** Excel の見出し行（0 から） */
   headerRow?: number;
-  /** Excel の見出しの段数（既定は結合セルから自動判定。最大3段） */
+  /** Excel の見出しの段数（1 以上の整数）。既定は結合セルから自動判定（縦の結合があるときだけ、最大3段） */
   headerRows?: number;
   /** HTML のページ内の表の番号 */
   table?: number;
@@ -113,6 +113,8 @@ export interface Meta {
   headerRow?: number;
   /** Excel の見出しの段数 */
   headerRows?: number;
+  /** Excel の見出しについての注意（2段かもしれないが判定しなかった、など） */
+  headerNote?: string;
   date1904?: boolean;
   /** HTML・テキストの読み取り方 */
   how?: string;
