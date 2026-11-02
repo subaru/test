@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nihon-tidy 使い方</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; max-width: 1180px; margin: 0 auto; padding: 0 16px 80px; }
+  .toc { position: sticky; top: 64px; align-self: start; max-height: calc(100vh - 80px); overflow-y: auto; padding: 24px 0; font-size: 14px; }
+  .toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .toc a { display: block; padding: 3px 8px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .toc a:hover { background: var(--panel); color: var(--text); }
+  main { min-width: 0; padding-top: 16px; }
+  .lead { font-size: 17px; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0; }
+  .flow span { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font-size: 14px; }
+  .flow i { color: var(--muted); font-style: normal; }
+
+  /* 実行できる例 */
+  .example { border: 1px solid var(--line); border-radius: 10px; margin: 14px 0; overflow: hidden; }
+  .example header { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 14px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 14px; }
+  .example header b { margin-right: auto; font-weight: 600; }
+  .example pre { border-radius: 0; }
+  .example .out { border-top: 1px solid var(--line); padding: 10px 14px; font-size: 13px; display: none; }
+  .example .out.show { display: block; }
+  .example .out pre { background: transparent; padding: 0; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto; }
+  .example .out .err { color: var(--ng); }
+  .example .out .box { margin-top: 6px; }
+  .example .out .label { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .example .out .label:first-child { margin-top: 0; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .toc { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="usage.html">nihon-tidy</a>
+  <nav>
+    <a href="usage.html" aria-current="page">使い方</a>
+    <a href="playground.html">検証アプリ</a>
+    <a href="https://github.com/subaru/test">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+<aside class="toc" aria-label="目次">
+  <ol>
+    <li><a href="#about">nihon-tidy とは</a></li>
+    <li><a href="#setup">準備</a></li>
+    <li><a href="#quick">はじめての正規化</a></li>
+    <li><a href="#input">入力の種類</a></li>
+    <li><a href="#options">オプション</a></li>
+    <li><a href="#result">結果の中身</a></li>
+    <li><a href="#fix">提案の適用と手直し</a></li>
+    <li><a href="#export">書き出し・保存</a></li>
+    <li><a href="#render">画面に表示する</a></li>
+    <li><a href="#element">&lt;tidy-table&gt; タグ</a></li>
+    <li><a href="#excel">Excel の複数段の見出し</a></li>
+    <li><a href="#address">住所プラグイン</a></li>
+    <li><a href="#plugin">独自のプラグイン</a></li>
+    <li><a href="#worker">大きなファイル（Worker）</a></li>
+    <li><a href="#steps">段階ごとに呼ぶ</a></li>
+    <li><a href="#cli">コマンドライン</a></li>
+    <li><a href="#api">API 一覧</a></li>
+  </ol>
+</aside>
+
+<main>
+<h1>nihon-tidy の使い方</h1>
+<p class="lead">日本語のデータ（CSV・JSON・Excel・HTML・テキスト）の<strong>列の種類を推論</strong>し、<strong>正規化</strong>して、<strong>何を変えたか</strong>を記録・表示する JavaScript ライブラリです。</p>
+<p class="muted">このページの例は、ブラウザの中で実際に動きます。「実行」を押すと結果が表示されます。データは外部に送られません。</p>
+
+<h2 id="about">nihon-tidy とは</h2>
+<p>バラバラな書き方のデータを、決まった形にそろえます。処理は次の流れです。</p>
+<div class="flow" aria-label="処理の流れ">
+  <span>読み込み <code>read</code></span><i>→</i>
+  <span>列の種類の推論 <code>detect</code></span><i>→</i>
+  <span>正規化 <code>normalize</code></span><i>→</i>
+  <span>表記ゆれの統一 <code>cluster</code></span><i>→</i>
+  <span>表示・レポート・書き出し</span>
+</div>
+<table class="doc">
+  <thead><tr><th>列の種類</th><th>入力 → 正規化後の例</th></tr></thead>
+  <tbody>
+    <tr><td>日付</td><td><code>令和6年4月1日</code> → <code>2024-04-01</code>、<code>S60.4.1</code> → <code>1985-04-01</code></td></tr>
+    <tr><td>電話番号</td><td><code>０３（１２３４）５６７８</code> → <code>03-1234-5678</code></td></tr>
+    <tr><td>郵便番号</td><td><code>〒150ー0002</code> → <code>150-0002</code></td></tr>
+    <tr><td>数値</td><td><code>¥12,000</code> → <code>12000</code>、<code>1万2千円</code> → <code>12000</code>、<code>△500</code> → <code>-500</code></td></tr>
+    <tr><td>真偽値</td><td><code>○</code> → <code>true</code>、<code>×</code> → <code>false</code></td></tr>
+    <tr><td>フリガナ</td><td><code>ﾔﾏﾀﾞ ﾀﾛｳ</code> → <code>ヤマダ タロウ</code></td></tr>
+    <tr><td>メール</td><td><code>Info@ABC.CO.JP</code> → <code>Info@abc.co.jp</code></td></tr>
+    <tr><td>すべての列</td><td>全角英数字→半角、半角カナ→全角、余分な空白を詰める</td></tr>
+  </tbody>
+</table>
+<div class="note"><strong>迷ったら変換しない</strong>：確信度が低い変換（既定では 0.9 未満）は適用せず「提案」として残します。変更はすべて記録され、あとから確認・適用・取り消しができます。</div>
+
+<h2 id="setup">準備</h2>
+<h3>このページを開く</h3>
+<p>ES Modules を使うため、HTML ファイルをダブルクリックで開いても動きません。リポジトリのフォルダで次のどちらかを実行し、表示された URL を開きます（Node.js 18 以上が必要）。</p>
+<pre><code>npm run docs
+# または
+node scripts/serve.js
+# → http://127.0.0.1:8080/docs/usage.html</code></pre>
+<p>Windows では <code>docs\start-docs.bat</code> をダブルクリックしても起動できます。</p>
+
+<h3>自分のページで使う</h3>
+<pre><code>&lt;script type="module"&gt;
+  import { tidy } from './nihon-tidy/src/index.js';   // リポジトリの src を置いた場所
+  // npm に公開した後は：import { tidy } from 'nihon-tidy';
+&lt;/script&gt;</code></pre>
+<p>Node.js（18 以上）でも同じ API が使えます：<code>import { tidy } from './src/index.js'</code></p>
+
+<h2 id="quick">はじめての正規化</h2>
+<p><code>tidy(入力, オプション)</code> を呼ぶだけです。結果の <code>data</code> が正規化後のデータ、<code>changes</code> が変更の記録です。</p>
+<div class="example" data-example="quick"></div>
+
+<h2 id="input">入力の種類</h2>
+<p>形式は自動で判定します（<code>format</code> オプションで指定も可）。</p>
+<table class="doc">
+  <thead><tr><th>渡せるもの</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td>文字列</td><td>CSV・TSV・JSON・HTML・テキスト</td></tr>
+    <tr><td><code>File</code>・<code>Blob</code></td><td><code>&lt;input type="file"&gt;</code> で選んだファイルなど。Shift_JIS も自動判定</td></tr>
+    <tr><td><code>ArrayBuffer</code>・<code>Uint8Array</code></td><td>バイト列（Excel の .xlsx も）</td></tr>
+    <tr><td>オブジェクトの配列</td><td><code>[{ 氏名: '山田', 電話: '…' }]</code> のような、API やスクレイピングの結果</td></tr>
+  </tbody>
+</table>
+<div class="example" data-example="records"></div>
+<div class="example" data-example="text"></div>
+<div class="example" data-example="html"></div>
+<div class="example" data-example="file"></div>
+<p>ファイル選択から読み込む場合：</p>
+<pre><code>input.addEventListener('change', async () =&gt; {
+  const result = await tidy(input.files[0]);
+});</code></pre>
+
+<h2 id="options">オプション</h2>
+<table class="doc">
+  <thead><tr><th>オプション</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>format</code></td><td><code>'csv' | 'json' | 'xlsx' | 'html' | 'text'</code>（既定は自動判定）</td></tr>
+    <tr><td><code>delimiter</code></td><td>CSV の区切り文字（既定は自動判定）</td></tr>
+    <tr><td><code>header</code></td><td><code>false</code> で見出しなし（列名は <code>列1</code>…）</td></tr>
+    <tr><td><code>sheet</code></td><td>Excel のシート名か番号（0 から）</td></tr>
+    <tr><td><code>headerRow</code></td><td>Excel の見出し行（0 から。既定は自動）</td></tr>
+    <tr><td><code>headerRows</code></td><td>Excel の見出しの段数（1 以上の整数。既定は自動）</td></tr>
+    <tr><td><code>table</code></td><td>HTML のページ内の表の番号</td></tr>
+    <tr><td><code>columns</code></td><td>列ごとの指定。<code>{ コード: { type: 'text' }, 備考: { cluster: false } }</code></td></tr>
+    <tr><td><code>minConfidence</code></td><td>これ未満の確信度の変換は提案にとどめる（既定 0.9）</td></tr>
+    <tr><td><code>cluster</code></td><td><code>false</code> で表記ゆれの統一をしない</td></tr>
+    <tr><td><code>threshold</code> / <code>hintedThreshold</code></td><td>列の種類と判定する一致率（既定 0.7 / 列名にヒントがあるとき 0.5）</td></tr>
+    <tr><td><code>plugins</code></td><td><code>['address']</code> や独自のプラグイン</td></tr>
+  </tbody>
+</table>
+<div class="example" data-example="options"></div>
+
+<h2 id="result">結果の中身</h2>
+<table class="doc">
+  <thead><tr><th>プロパティ</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>data</code></td><td>正規化後のデータ（オブジェクトの配列）</td></tr>
+    <tr><td><code>schema</code></td><td>列ごとの推論結果：<code>name</code>・<code>type</code>・<code>label</code>・<code>confidence</code>（一致した割合）・<code>candidates</code> など</td></tr>
+    <tr><td><code>changes</code></td><td>変更の記録：<code>row</code>・<code>column</code>・<code>before</code>・<code>after</code>・<code>rule</code>・<code>note</code>・<code>confidence</code>・<code>applied</code>（適用したか）</td></tr>
+    <tr><td><code>issues</code></td><td>要確認：解釈できなかった値など。<code>row</code>・<code>column</code>・<code>value</code>・<code>reason</code></td></tr>
+    <tr><td><code>clusters</code></td><td>表記ゆれのまとまり：<code>canonical</code>（統一後）・<code>variants</code>・<code>applied</code></td></tr>
+    <tr><td><code>meta</code></td><td>読み込みの情報：<code>source</code>・<code>encoding</code>・<code>sheet</code>・<code>headerRows</code> など</td></tr>
+  </tbody>
+</table>
+<div class="example" data-example="result"></div>
+
+<h2 id="fix">提案の適用と手直し</h2>
+<p>確信度が低く適用しなかった変換（<code>applied: false</code>）は、あとから適用できます。行番号は <code>data</code> の添字（0 から）です。</p>
+<table class="doc">
+  <thead><tr><th>メソッド</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>accept(row, column)</code></td><td>その提案を適用する（適用したら <code>true</code>）</td></tr>
+    <tr><td><code>acceptAll()</code></td><td>提案をすべて適用する（適用した数を返す）</td></tr>
+    <tr><td><code>dismiss(row, column)</code></td><td>提案を「そのまま」にする</td></tr>
+    <tr><td><code>fix(row, column, value, note?)</code></td><td>値を手で直す（変更ログに「手動」として残る）</td></tr>
+    <tr><td><code>setCanonical(index, value)</code></td><td>表記ゆれのまとまりの統一後の表記を選び直す</td></tr>
+  </tbody>
+</table>
+<div class="example" data-example="fix"></div>
+
+<h2 id="export">書き出し・保存</h2>
+<table class="doc">
+  <thead><tr><th>メソッド</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>toCSV({ bom })</code></td><td>CSV 文字列。<code>bom: true</code> で Excel で文字化けしない。<code>=</code> などで始まる値は数式にならないよう <code>'</code> を付ける</td></tr>
+    <tr><td><code>toJSON()</code></td><td><code>data</code> を返す（<code>JSON.stringify(result)</code> でも同じ）</td></tr>
+    <tr><td><code>toReport({ title })</code></td><td>分析レポートの HTML 文字列（列の推論・変更・要確認の一覧）</td></tr>
+    <tr><td><code>toTableHTML()</code> / <code>toCardsHTML()</code></td><td>表・カードの HTML 文字列（サーバー側で使える）</td></tr>
+    <tr><td><code>toPlain()</code> / <code>hydrate(plain)</code></td><td>保存用の素のオブジェクトにする／そこから操作を付け直す</td></tr>
+  </tbody>
+</table>
+<div class="example" data-example="export"></div>
+
+<h2 id="render">画面に表示する</h2>
+<p><code>result.render(要素, オプション)</code> で、検索・並べ替えができる表やカードを描きます。<code>result.renderReview(要素)</code> は要確認を直す画面です。</p>
+<table class="doc">
+  <thead><tr><th>render のオプション</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>view</code></td><td><code>'table'</code>（既定）か <code>'cards'</code></td></tr>
+    <tr><td><code>titleColumn</code></td><td>カードの見出しにする列</td></tr>
+    <tr><td><code>virtual</code></td><td>仮想スクロール。<code>'auto'</code>（既定：<code>threshold</code> 行を超えたら）・<code>true</code>・<code>false</code></td></tr>
+    <tr><td><code>height</code> / <code>threshold</code></td><td>仮想スクロールの表の高さ（既定 480px）／切り替える行数（既定 500）</td></tr>
+    <tr><td><code>batch</code></td><td>カードを一度に描く枚数（既定 200。下までスクロールすると次を足す）</td></tr>
+    <tr><td><code>style</code></td><td><code>false</code> で既定の CSS を入れない</td></tr>
+  </tbody>
+</table>
+<p>戻り値のコントローラ：<code>refresh()</code>（値を直した後に描き直す）・<code>setView('cards')</code>・<code>destroy()</code>。</p>
+<div class="example" data-example="render"></div>
+<div class="example" data-example="virtual"></div>
+
+<h2 id="element">&lt;tidy-table&gt; タグ</h2>
+<p>JavaScript を書かずに、タグを置くだけで読み込み・正規化・表示ができます。</p>
+<pre><code>&lt;script type="module" src="./nihon-tidy/src/view/element.js"&gt;&lt;/script&gt;
+&lt;tidy-table src="customers.xlsx" view="cards" title-column="顧客名" report-button&gt;&lt;/tidy-table&gt;</code></pre>
+<table class="doc">
+  <thead><tr><th>属性</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>src</code></td><td>読み込むファイルの URL</td></tr>
+    <tr><td><code>view</code> / <code>title-column</code></td><td><code>table</code> か <code>cards</code> ／ カードの見出しの列</td></tr>
+    <tr><td><code>sheet</code> / <code>min-confidence</code></td><td>Excel のシート ／ 提案にとどめる確信度</td></tr>
+    <tr><td><code>review</code> / <code>report-button</code></td><td>要確認を直す画面 ／「分析レポートを開く」ボタン</td></tr>
+    <tr><td><code>plugins</code> / <code>worker</code></td><td><code>address</code> など ／ Web Worker で処理</td></tr>
+    <tr><td><code>height</code></td><td>仮想スクロールの表の高さ（px）</td></tr>
+  </tbody>
+</table>
+<p>イベント：<code>tidy-load</code>（読み込み完了）・<code>tidy-change</code>（修正のたび）・<code>tidy-error</code>。結果は <code>e.detail</code> または <code>element.result</code>。</p>
+<div class="example" data-example="element"></div>
+
+<h2 id="excel">Excel の複数段の見出し</h2>
+<p>「売上」の下に「上期・下期」があるような見出しを、<code>売上・上期</code> のように 1 つの列名にします（最大 3 段）。データの行を見出しとして読み込まないよう、判定は控えめです。</p>
+<ul>
+  <li>自動で判定するのは、見出し行から次の行へ<strong>縦に結合したセル</strong>（2 段にまたがる「店舗」など）があるときだけ</li>
+  <li>縦の結合がなく 2 段かもしれない表は 1 段で読み、<code>meta.headerNote</code> に注意を残す</li>
+  <li><code>headerRows: 2</code> で段数を指定できる</li>
+</ul>
+<div class="example" data-example="excel"></div>
+
+<h2 id="address">住所プラグイン</h2>
+<p><code>plugins: ['address']</code> で住所の列を判定し、番地の書き方の統一や都道府県の補完を<strong>提案</strong>します。住所は自動では変えません（すべて提案。<code>accept</code> か <code>acceptAll</code> で適用）。</p>
+<div class="example" data-example="address"></div>
+
+<h2 id="plugin">独自のプラグイン</h2>
+<p>列の種類の規則を足せます。規則は <code>{ type, label, hint?, match(value), normalize(value) }</code> で、<code>normalize</code> は <code>{ value, confidence, note }</code> か <code>null</code> を返します。</p>
+<div class="example" data-example="plugin"></div>
+
+<h2 id="worker">大きなファイル（Web Worker）</h2>
+<p><code>tidyInWorker</code> は <code>tidy</code> と同じ結果を返し、処理の間も画面が止まりません。プラグインは名前（<code>'address'</code>）で指定します。Worker を使えない環境では <code>tidy</code> と同じに動きます。</p>
+<div class="example" data-example="worker"></div>
+
+<h2 id="steps">段階ごとに呼ぶ</h2>
+<p>途中の結果を確かめたいときは、各段階を個別に呼べます。</p>
+<div class="example" data-example="steps"></div>
+
+<h2 id="cli">コマンドライン</h2>
+<pre><code>node bin/cli.js examples/sample-sjis.csv --report report.html --out output.json
+node bin/cli.js examples/sample.xlsx --sheet 顧客一覧 --out output.csv   # CSV は BOM 付き
+node bin/cli.js data.csv --plugins address --min-confidence 0.8
+node bin/cli.js --help</code></pre>
+
+<h2 id="api">API 一覧</h2>
+<table class="doc">
+  <thead><tr><th>読み込み先</th><th>公開しているもの</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/index.js</code></td><td><code>tidy</code>・<code>tidyInWorker</code>・<code>hydrate</code>・<code>read</code>・<code>detect</code>・<code>normalize</code>・<code>cluster</code>・<code>toReport</code>・<code>toCSV</code>・<code>toTableHTML</code>・<code>toCardsHTML</code>・<code>render</code>・<code>renderReview</code>・<code>fingerprint</code>・<code>rules</code>・<code>ruleSet</code></td></tr>
+    <tr><td><code>src/plugins/address.js</code></td><td><code>address()</code>（既定）・<code>parseAddress</code>・<code>normalizeBlock</code>・<code>kanjiToNumber</code>・<code>PREFECTURES</code></td></tr>
+    <tr><td><code>src/view/element.js</code></td><td><code>&lt;tidy-table&gt;</code></td></tr>
+  </tbody>
+</table>
+<p class="muted">型定義は <code>index.d.ts</code>、詳しい説明は README.md にあります。実際のファイルで試すには<a href="playground.html">検証アプリ</a>を使ってください。</p>
+</main>
+</div>
+
+<script type="module">
+import * as lib from '../src/index.js';
+import address, { parseAddress } from '../src/plugins/address.js';
+import '../src/view/element.js';
+
+// 実行できる例。code はそのまま表示し、そのまま実行する（表示と動作がずれないように）
+// 例の中では show(値)・show(ラベル, 値) で結果を出し、box() で描画先の要素を作れる
+const EXAMPLES = {
+  quick: {
+    title: '文字列の CSV を正規化する',
+    code: `const csv = \`顧客名,電話,誕生日,金額
+山田太郎,０３（１２３４）５６７８,令和6年4月1日,"¥12,000"
+ﾔﾏﾀﾞ商事㈱,090-1234-5678,S60.4.1,1万2千円\`;
+
+const result = await tidy(csv);
+show('data（正規化後）', result.data);
+show('変更の数', result.changes.length);`,
+  },
+  records: {
+    title: 'オブジェクトの配列（API・スクレイピングの結果）',
+    code: `const result = await tidy([
+  { 店名: 'カフェ　ＡＢＣ', 郵便番号: '〒150ー0002', 会員: '○' },
+  { 店名: '喫茶さくら', 郵便番号: '〒100-0001', 会員: '×' },
+]);
+show(result.data);`,
+  },
+  text: {
+    title: '構造のないテキスト（「項目：値」の並び）',
+    code: `const memo = \`氏名：山田 太郎
+電話：０３－１２３４－５６７８
+登録日：令和6年4月1日
+
+氏名：佐藤 花子
+電話：06(1234)5678
+登録日：2024/4/2\`;
+
+const result = await tidy(memo);
+show('読み取り方', result.meta.how);
+show(result.data);`,
+  },
+  html: {
+    title: 'HTML（スクレイピングしたページ）',
+    code: `const page = \`<table>
+  <tr><th>会社名</th><th>設立</th></tr>
+  <tr><td>株式会社ＡＢＣ</td><td>平成元年4月1日</td></tr>
+  <tr><td>(株)ABC</td><td>H1.4.1</td></tr>
+</table>\`;
+
+const result = await tidy(page);
+show(result.data);
+show('表記ゆれ', result.clusters);`,
+  },
+  file: {
+    title: 'ファイルを取得して読み込む（Shift_JIS の CSV・Excel）',
+    code: `const res = await fetch('../examples/sample-sjis.csv');
+const result = await tidy(await res.blob());
+show('文字コード', result.meta.encoding);
+show('列の種類', result.schema.map((c) => \`\${c.name}: \${c.label}\`));
+
+const xlsx = await tidy(await (await fetch('../examples/sample.xlsx')).arrayBuffer());
+show('Excel のシート', xlsx.meta.sheets);`,
+  },
+  options: {
+    title: 'オプションを指定する',
+    code: `const csv = \`コード,電話,備考
+0012,0451234567,(株)ABC
+0034,0312345678,株式会社ABC\`;
+
+const result = await tidy(csv, {
+  columns: { コード: { type: 'text' }, 備考: { cluster: false } }, // 種類の指定・表記ゆれの統一をしない
+  minConfidence: 0.5,                                             // 確信度 0.5 以上は適用する
+});
+show(result.data);`,
+  },
+  result: {
+    title: '列の推論・変更・要確認を見る',
+    code: `const result = await tidy(\`氏名,電話,入会日
+山田,０３（１２３４）５６７８,令和6年4月1日
+佐藤,不明,昭和64年1月10日\`);
+
+show('schema', result.schema.map(({ name, type, label, confidence }) => ({ name, type, label, confidence })));
+show('changes', result.changes.map(({ row, column, before, after, applied, note }) => ({ row, column, before, after, applied, note })));
+show('issues', result.issues.map(({ row, column, value, reason }) => ({ row, column, value, reason })));`,
+  },
+  fix: {
+    title: '提案を適用し、値を手で直す',
+    code: `const result = await tidy(\`氏名,電話
+山田,0451234567
+佐藤,0312345678\`, { columns: { 電話: { type: 'phone' } } });
+
+show('提案（未適用）', result.changes.filter((c) => !c.applied).map((c) => \`data[\${c.row}].\${c.column}: \${c.before} → \${c.after}\`));
+result.accept(0, '電話');               // data[0] の電話の提案を適用（行は 0 から数える）
+result.fix(1, '氏名', '佐藤 花子', '正式な氏名');
+show(result.data);`,
+  },
+  export: {
+    title: 'CSV・レポートに書き出す',
+    code: `const result = await tidy(\`品名,価格
+=SUM(A1),"¥1,200"
+りんご,１００円\`);
+
+show('CSV', result.toCSV());   // 数式に見える値は ' を付けて無害にする
+const report = result.toReport({ title: '取り込み結果' });
+show('レポートHTMLの長さ', report.length);
+
+// 保存して、あとで操作を付け直す
+const saved = JSON.stringify(result.toPlain());
+const again = hydrate(JSON.parse(saved));
+show('復元した行数', again.data.length);`,
+  },
+  render: {
+    title: '表・カードで表示し、要確認を直す画面も出す',
+    code: `const result = await tidy(await (await fetch('../examples/sample-sjis.csv')).blob());
+const review = box();
+const view = box();
+const ctl = result.render(view, { view: 'table' });
+result.renderReview(review, { onChange: () => ctl.refresh() });`,
+  },
+  virtual: {
+    title: '5万行を仮想スクロールで表示する',
+    code: `const rows = Array.from({ length: 50000 }, (_, i) => ({
+  番号: i + 1, 顧客名: \`顧客\${i + 1}\`, 金額: \`¥\${(i * 37 % 100000).toLocaleString()}\`,
+}));
+const t = performance.now();
+const result = await tidy(rows);
+show('正規化', \`\${Math.round(performance.now() - t)} ms\`);
+const t2 = performance.now();
+result.render(box(), { height: 320 });
+show('表示', \`\${Math.round(performance.now() - t2)} ms\`);`,
+  },
+  element: {
+    title: '<tidy-table> を JavaScript から作る',
+    code: `const el = document.createElement('tidy-table');
+el.setAttribute('src', '../examples/sample.xlsx');
+el.setAttribute('view', 'cards');
+el.setAttribute('report-button', '');
+el.addEventListener('tidy-load', (e) => show('読み込んだ行数', e.detail.data.length));
+box().append(el);`,
+  },
+  excel: {
+    title: '2 段の見出しの Excel を読む',
+    code: `const bytes = await (await fetch('../examples/sample-2row.xlsx')).arrayBuffer();
+const result = await tidy(bytes);
+show('見出しの段数', result.meta.headerRows);
+show('列名', result.schema.map((c) => c.name));
+
+const one = await tidy(bytes, { headerRows: 1 });   // 1 段として読む
+show('headerRows: 1 の列名', one.schema.map((c) => c.name));`,
+  },
+  address: {
+    title: '住所の書き方の統一を提案する',
+    code: `const result = await tidy(\`氏名,住所
+山田,東京都中央区銀座四丁目6番16号
+佐藤,大阪市北区梅田1丁目1番地\`, { plugins: ['address'] });
+
+show('住所の提案', result.changes.filter((c) => c.column === '住所').map((c) => \`\${c.before} → \${c.after}（\${c.note}）\`));
+result.acceptAll();
+show(result.data);
+show('parseAddress', parseAddress('〒100-0001 東京都千代田区千代田1-1'));`,
+  },
+  plugin: {
+    title: '品番の規則を足す',
+    code: `const sku = {
+  type: 'sku', label: '品番', hint: /品番/,
+  match: (v) => /^[a-z]{2}-?\\d{4}$/i.test(v),
+  normalize: (v) => ({ value: v.toUpperCase().replace(/^([A-Z]{2})-?/, '$1-'), confidence: 1, note: '品番の書式を統一' }),
+};
+const result = await tidy(\`品番,数量
+ab1234,3
+CD-5678,1\`, { plugins: [{ name: 'sku', rules: [sku] }] });
+show(result.schema.map((c) => \`\${c.name}: \${c.label}\`));
+show(result.data);`,
+  },
+  worker: {
+    title: 'Web Worker で処理する',
+    code: `const res = await fetch('../examples/sample-scrape.html');
+const result = await tidyInWorker(await res.blob(), { plugins: ['address'] });
+show('行数', result.data.length);
+show(result.data[0]);`,
+  },
+  steps: {
+    title: 'read → detect → normalize → cluster',
+    code: `const table = await read(\`会社,設立
+株式会社ＡＢＣ,平成元年4月1日
+(株)ABC,H1.4.1\`);
+show('read', { columns: table.columns, rows: table.rows });
+
+const schema = detect(table);
+show('detect', schema.map((c) => \`\${c.name}: \${c.label}\`));
+
+const { data, changes, issues } = normalize(table, schema);
+const clusters = cluster({ data, schema, changes, issues });
+show('normalize + cluster', data);`,
+  },
+};
+
+const AsyncFunction = (async () => {}).constructor;
+const scope = { ...lib, address, parseAddress };
+
+function stringify(v) {
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+for (const el of document.querySelectorAll('[data-example]')) {
+  const ex = EXAMPLES[el.dataset.example];
+  const header = document.createElement('header');
+  const title = document.createElement('b');
+  title.textContent = ex.title;
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'primary';
+  run.textContent = '実行';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = 'コピー';
+  header.append(title, copy, run);
+  const pre = document.createElement('pre');
+  const code = document.createElement('code');
+  code.textContent = ex.code;
+  pre.append(code);
+  const out = document.createElement('div');
+  out.className = 'out';
+  out.setAttribute('aria-live', 'polite');
+  el.append(header, pre, out);
+
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(ex.code);
+      copy.textContent = 'コピーしました';
+    } catch {
+      copy.textContent = 'コピーできません';
+    }
+    setTimeout(() => (copy.textContent = 'コピー'), 1500);
+  });
+
+  run.addEventListener('click', async () => {
+    out.replaceChildren();
+    out.classList.add('show');
+    run.disabled = true;
+    const show = (...args) => {
+      const [label, value] = args.length > 1 ? args : [null, args[0]];
+      if (label) {
+        const l = document.createElement('div');
+        l.className = 'label';
+        l.textContent = label;
+        out.append(l);
+      }
+      const p = document.createElement('pre');
+      p.textContent = stringify(value);
+      out.append(p);
+    };
+    const box = () => {
+      const d = document.createElement('div');
+      d.className = 'box';
+      out.append(d);
+      return d;
+    };
+    try {
+      const fn = new AsyncFunction(...Object.keys(scope), 'show', 'box', ex.code);
+      await fn(...Object.values(scope), show, box);
+    } catch (error) {
+      const p = document.createElement('pre');
+      p.className = 'err';
+      p.textContent = `エラー：${error.message}`;
+      out.append(p);
+    } finally {
+      run.disabled = false;
+      run.textContent = 'もう一度実行';
+    }
+  });
+}
+</script>
+</body>
+</html>

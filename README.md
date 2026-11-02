@@ -179,6 +179,11 @@ Worker が使えない場合は、メインスレッドで `tidy` を呼びま�
 
 ## 使い方
 
+**使い方のページと検証用アプリ**：`npm run docs`（または `node scripts/serve.js`、Windows は `docs\start-docs.bat`）で起動し、次を開きます。
+
+- 使い方（例をその場で実行できる）：http://127.0.0.1:8080/docs/usage.html
+- 検証用アプリ（ファイルを入れて、列の推論・変更ログ・要確認・レポートを確かめる。5万行のデータの生成も）：http://127.0.0.1:8080/docs/playground.html
+
 ### ブラウザ（コンテンツHTML）
 
 ```html
@@ -307,6 +312,7 @@ src/
   report/    分析レポートHTMLの生成
   view/      コンテンツHTML用の表示（表・カード・修正画面・<tidy-table>）
 bin/cli.js   コマンドライン
+docs/        使い方のページ（usage.html）と検証用アプリ（playground.html）
 index.d.ts・types/  型定義
 scripts/     サンプルデータの生成
 ```

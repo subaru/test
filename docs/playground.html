@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nihon-tidy 検証アプリ</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .app { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; max-width: 1400px; margin: 0 auto; padding: 16px; }
+  .side { display: grid; gap: 14px; align-content: start; min-width: 0; }
+  .card { min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; padding: 0; border: 0; color: var(--muted); font-weight: 600; }
+  .drop { display: block; border: 2px dashed var(--line); border-radius: 8px; padding: 18px 10px; text-align: center; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .drop.over { border-color: var(--accent); color: var(--text); }
+  .drop input { display: none; }
+  .samples { display: flex; flex-wrap: wrap; gap: 6px; }
+  .samples button { font-size: 13px; padding: 3px 9px; }
+  textarea { width: 100%; min-height: 110px; font-family: var(--mono); font-size: 12px; resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 14px; }
+  .row output { min-width: 2.6em; text-align: right; font-variant-numeric: tabular-nums; }
+  .row label { flex: none; width: 8em; color: var(--muted); }
+  .row select, .row input[type=number] { flex: 1; min-width: 0; }
+  .row input[type=range] { flex: 1; min-width: 0; width: 0; }
+  .check { display: flex; gap: 6px; align-items: center; font-size: 14px; margin: 4px 0; }
+  .gen { display: flex; gap: 6px; }
+  .gen select { flex: 1; }
+
+  .status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 40px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+  .stat b { font-size: 16px; margin-left: 4px; font-variant-numeric: tabular-nums; }
+  .msg { font-size: 14px; color: var(--muted); }
+  .msg.err { color: var(--ng); }
+  .actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-top: 12px; overflow-x: auto; }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 8px 12px; white-space: nowrap; color: var(--muted); }
+  .tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--text); font-weight: 600; }
+  .tabs .count { font-size: 12px; margin-left: 4px; opacity: .8; }
+  .panel { padding: 14px 0; }
+  .panel[hidden] { display: none; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+  table.list { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.list th, table.list td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; }
+  table.list th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--bg); }
+  table.list td.v { font-family: var(--mono); word-break: break-all; }
+  .pill { display: inline-block; font-size: 12px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); }
+  .pill.ok { color: var(--ok); border-color: currentColor; }
+  .pill.warn { color: var(--warn); border-color: currentColor; }
+  .scroll { max-height: 560px; overflow: auto; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; font-size: 14px; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; min-width: 60px; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  iframe { width: 100%; height: 720px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  pre.json { max-height: 600px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+
+  @media (max-width: 900px) { .app { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="usage.html">nihon-tidy</a>
+  <nav>
+    <a href="usage.html">使い方</a>
+    <a href="playground.html" aria-current="page">検証アプリ</a>
+    <a href="https://github.com/subaru/test">GitHub</a>
+  </nav>
+  <span class="spacer muted" style="font-size:13px">データはブラウザの中だけで処理され、外部に送られません</span>
+</header>
+
+<div class="app">
+  <aside class="side">
+    <section class="card">
+      <h2>1. 入力</h2>
+      <label class="drop" id="drop">
+        ファイルをここにドロップ、またはクリックして選択<br>
+        <span style="font-size:12px">CSV・TSV・JSON・Excel（.xlsx）・HTML・テキスト</span>
+        <input type="file" id="file" accept=".csv,.tsv,.txt,.json,.xlsx,.html,.htm">
+      </label>
+      <p class="muted" style="font-size:13px;margin:10px 0 4px">サンプル</p>
+      <div class="samples" id="samples"></div>
+      <p class="muted" style="font-size:13px;margin:10px 0 4px">貼り付け</p>
+      <textarea id="paste" placeholder="CSV・JSON・HTML・テキストを貼り付け" spellcheck="false"></textarea>
+      <div class="row"><button type="button" id="runPaste">貼り付けた内容を処理</button></div>
+      <p class="muted" style="font-size:13px;margin:10px 0 4px">性能の確認用に、表記の揺れたデータを作る</p>
+      <div class="gen">
+        <select id="genRows" aria-label="作る行数">
+          <option value="1000">1,000行</option>
+          <option value="10000">1万行</option>
+          <option value="50000" selected>5万行</option>
+          <option value="100000">10万行</option>
+        </select>
+        <button type="button" id="gen">作って処理</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. オプション（変えると処理し直します）</h2>
+      <div class="row"><label for="format">形式</label>
+        <select id="format"><option value="">自動</option><option>csv</option><option>json</option><option>xlsx</option><option>html</option><option>text</option></select></div>
+      <div class="row"><label for="sheet">シート</label><select id="sheet" disabled><option value="">（Excel のみ）</option></select></div>
+      <div class="row"><label for="headerRows">見出しの段数</label>
+        <select id="headerRows"><option value="">自動</option><option>1</option><option>2</option><option>3</option></select></div>
+      <div class="row"><label for="minConfidence">適用する確信度</label>
+        <input type="range" id="minConfidence" min="0" max="1" step="0.05" value="0.9"><output id="minConfidenceOut">0.90</output></div>
+      <label class="check"><input type="checkbox" id="header" checked> 1行目は見出し</label>
+      <label class="check"><input type="checkbox" id="cluster" checked> 表記ゆれを統一する</label>
+      <label class="check"><input type="checkbox" id="address"> 住所プラグイン</label>
+      <label class="check"><input type="checkbox" id="worker"> Web Worker で処理</label>
+    </section>
+
+    <section class="card">
+      <h2>3. 表示</h2>
+      <div class="row"><label for="view">表示形式</label>
+        <select id="view"><option value="table">表</option><option value="cards">カード</option></select></div>
+      <div class="row"><label for="virtual">仮想スクロール</label>
+        <select id="virtual"><option value="auto">自動（500行超）</option><option value="true">常に</option><option value="false">使わない</option></select></div>
+      <div class="row"><label for="height">表の高さ</label><input type="number" id="height" min="120" step="40" value="480"></div>
+    </section>
+  </aside>
+
+  <main>
+    <div class="status" id="status"><span class="msg">左でファイルを選ぶか、サンプルを押してください。</span></div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <section class="panel" id="panel-view" role="tabpanel"><div id="review"></div><div id="viewBox"></div></section>
+    <section class="panel" id="panel-schema" role="tabpanel" hidden></section>
+    <section class="panel" id="panel-changes" role="tabpanel" hidden></section>
+    <section class="panel" id="panel-issues" role="tabpanel" hidden></section>
+    <section class="panel" id="panel-clusters" role="tabpanel" hidden></section>
+    <section class="panel" id="panel-meta" role="tabpanel" hidden></section>
+    <section class="panel" id="panel-report" role="tabpanel" hidden></section>
+    <section class="panel" id="panel-json" role="tabpanel" hidden></section>
+  </main>
+</div>
+
+<script type="module">
+import { tidy, tidyInWorker } from '../src/index.js';
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children.filter((c) => c !== null && c !== undefined));
+  return node;
+};
+const fmt = (v) => (v === null || v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v));
+
+const SAMPLES = [
+  ['CSV（Shift_JIS）', 'sample-sjis.csv'],
+  ['CSV', 'sample.csv'],
+  ['Excel', 'sample.xlsx'],
+  ['Excel 2段の見出し', 'sample-2row.xlsx'],
+  ['HTML', 'sample-scrape.html'],
+  ['テキスト（項目：値）', 'sample-kv.txt'],
+  ['テキスト（メモ）', 'sample-memo.txt'],
+];
+
+const TABS = [
+  ['view', '表示'],
+  ['schema', '列の種類'],
+  ['changes', '変更ログ'],
+  ['issues', '要確認'],
+  ['clusters', '表記ゆれ'],
+  ['meta', '読み込みの情報'],
+  ['report', '分析レポート'],
+  ['json', 'JSON'],
+];
+
+let input = null;      // 最後に処理した入力（オプションを変えたら処理し直す）
+let inputName = '';
+let result = null;
+let controller = null;
+let ticket = 0;
+let tab = 'view';
+let lastTimes = {};
+
+// ---- タブ ----
+const tabButtons = {};
+for (const [id, label] of TABS) {
+  const b = el('button', { type: 'button', role: 'tab', textContent: label });
+  b.setAttribute('aria-selected', String(id === tab));
+  b.setAttribute('aria-controls', `panel-${id}`);
+  b.addEventListener('click', () => selectTab(id));
+  tabButtons[id] = b;
+  $('tabs').append(b);
+}
+function selectTab(id) {
+  tab = id;
+  for (const [k, b] of Object.entries(tabButtons)) {
+    b.setAttribute('aria-selected', String(k === id));
+    $(`panel-${k}`).hidden = k !== id;
+  }
+  if (result) drawPanel(id);
+}
+function setCounts() {
+  const n = {
+    changes: result?.changes.length,
+    issues: result?.issues.length,
+    clusters: result?.clusters.length,
+    schema: result?.schema.length,
+  };
+  for (const [id, label] of TABS) {
+    const b = tabButtons[id];
+    b.replaceChildren(label);
+    if (n[id] !== undefined) b.append(el('span', { className: 'count', textContent: `(${n[id].toLocaleString()})` }));
+  }
+}
+
+// ---- 入力 ----
+const drop = $('drop');
+$('file').addEventListener('change', (e) => e.target.files[0] && start(e.target.files[0], e.target.files[0].name, true));
+for (const ev of ['dragenter', 'dragover']) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); });
+for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) start(f, f.name, true);
+});
+for (const [label, name] of SAMPLES) {
+  const b = el('button', { type: 'button', textContent: label, title: name });
+  b.addEventListener('click', async () => {
+    try {
+      const res = await fetch(`../examples/${name}`);
+      if (!res.ok) throw new Error(`${name} を読み込めません（${res.status}）`);
+      start(Object.assign(await res.blob(), { name }), name, true);
+    } catch (error) {
+      showError(error);
+    }
+  });
+  $('samples').append(b);
+}
+$('runPaste').addEventListener('click', () => {
+  const text = $('paste').value;
+  if (text.trim()) start(text, '貼り付け', true);
+});
+$('gen').addEventListener('click', () => {
+  const n = Number($('genRows').value);
+  start(generate(n), `生成データ（${n.toLocaleString()}行）`, true);
+});
+
+// ---- オプション ----
+$('minConfidence').addEventListener('input', () => ($('minConfidenceOut').value = Number($('minConfidence').value).toFixed(2)));
+for (const id of ['format', 'sheet', 'headerRows', 'minConfidence', 'header', 'cluster', 'address', 'worker']) {
+  $(id).addEventListener('change', () => input !== null && start(input, inputName, false));
+}
+$('view').addEventListener('change', () => controller?.setView($('view').value));
+for (const id of ['virtual', 'height']) $(id).addEventListener('change', () => result && drawView());
+
+function options() {
+  const o = { minConfidence: Number($('minConfidence').value) };
+  if ($('format').value) o.format = $('format').value;
+  if ($('sheet').value !== '') o.sheet = Number($('sheet').value);
+  if ($('headerRows').value) o.headerRows = Number($('headerRows').value);
+  if (!$('header').checked) o.header = false;
+  if (!$('cluster').checked) o.cluster = false;
+  if ($('address').checked) o.plugins = ['address'];
+  return o;
+}
+
+// ---- 処理 ----
+async function start(value, name, fresh) {
+  if (fresh) {
+    // 別の入力ではシートの選択を戻す
+    $('sheet').replaceChildren(el('option', { value: '', textContent: '（Excel のみ）' }));
+    $('sheet').disabled = true;
+  }
+  input = value;
+  inputName = name;
+  const mine = ++ticket;
+  const opts = options();
+  const useWorker = $('worker').checked;
+  $('status').replaceChildren(el('span', { className: 'msg', textContent: `処理中…（${name}${useWorker ? '、Web Worker' : ''}）` }));
+  await new Promise((r) => setTimeout(r, 30)); // 「処理中」を先に描く
+  const t0 = performance.now();
+  let next;
+  try {
+    next = await (useWorker ? tidyInWorker : tidy)(value, opts);
+  } catch (error) {
+    if (mine === ticket) showError(error);
+    return;
+  }
+  if (mine !== ticket) return; // 後から始めた処理を優先する
+  lastTimes = { tidy: performance.now() - t0 };
+  result = next;
+  fillSheets();
+  drawView();
+  setCounts();
+  drawStatus();
+  if (tab !== 'view') drawPanel(tab);
+}
+
+function fillSheets() {
+  const sheets = result.meta.sheets;
+  const sel = $('sheet');
+  if (!sheets || sel.options.length > 1) return;
+  sel.replaceChildren(...sheets.map((s, i) => el('option', { value: String(i), textContent: s })));
+  sel.value = String(Math.max(0, sheets.indexOf(result.meta.sheet)));
+  sel.disabled = sheets.length < 2;
+}
+
+function showError(error) {
+  $('status').replaceChildren(el('span', { className: 'msg err', textContent: `エラー：${error.message}` }));
+}
+
+function drawStatus() {
+  const applied = result.changes.filter((c) => c.applied).length;
+  const stat = (label, value) => el('span', { className: 'stat' }, label, el('b', { textContent: value }));
+  const actions = el('div', { className: 'actions' });
+  const dl = (label, make, file, type) => {
+    const b = el('button', { type: 'button', textContent: label });
+    b.addEventListener('click', () => {
+      const a = el('a', { href: URL.createObjectURL(new Blob([make()], { type })), download: file });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    return b;
+  };
+  const base = (inputName.replace(/\.[^.]+$/, '') || 'data').replace(/[\\/:*?"<>|]/g, '_');
+  const acceptAll = el('button', { type: 'button', textContent: '提案をすべて適用' });
+  acceptAll.disabled = applied === result.changes.length;
+  acceptAll.addEventListener('click', () => {
+    result.acceptAll();
+    changed();
+  });
+  actions.append(
+    acceptAll,
+    dl('CSV', () => result.toCSV({ bom: true }), `${base}_tidy.csv`, 'text/csv'),
+    dl('JSON', () => JSON.stringify(result.data, null, 2), `${base}_tidy.json`, 'application/json'),
+    dl('レポート', () => result.toReport({ title: `${inputName} の分析レポート` }), `${base}_report.html`, 'text/html'),
+  );
+  const items = [
+    stat('入力', inputName),
+    stat('行', result.data.length.toLocaleString()),
+    stat('列', result.schema.length),
+    stat('適用', applied.toLocaleString()),
+    stat('提案', (result.changes.length - applied).toLocaleString()),
+    stat('要確認', result.issues.length.toLocaleString()),
+    stat('処理', `${Math.round(lastTimes.tidy).toLocaleString()} ms`),
+  ];
+  if (lastTimes.render !== undefined) items.push(stat('表示', `${Math.round(lastTimes.render)} ms`));
+  $('status').replaceChildren(...items, actions);
+}
+
+// 修正のあと：表示を描き直し、ほかのタブと数を更新する
+function changed() {
+  controller?.refresh();
+  if (!$('review').querySelector('.tidy-review')) drawReview();
+  setCounts();
+  drawStatus();
+  if (tab !== 'view') drawPanel(tab);
+}
+
+function drawView() {
+  controller?.destroy();
+  const t = performance.now();
+  const virtual = { auto: 'auto', true: true, false: false }[$('virtual').value];
+  controller = result.render($('viewBox'), { view: $('view').value, virtual, height: Number($('height').value) || 480 });
+  lastTimes.render = performance.now() - t;
+  drawReview();
+}
+
+// 要確認を直す画面。renderReview はすべての項目を描くので、数が多いときはボタンを押してから描く
+const REVIEW_LIMIT = 2000;
+function drawReview(force = false) {
+  const n = result.issues.length + result.clusters.length;
+  if (n <= REVIEW_LIMIT || force) {
+    result.renderReview($('review'), { onChange: changed });
+    return;
+  }
+  const b = el('button', { type: 'button', textContent: `要確認を直す画面を表示する（${result.issues.length.toLocaleString()}件。時間がかかります）` });
+  b.addEventListener('click', () => {
+    b.disabled = true;
+    b.textContent = '描画中…';
+    setTimeout(() => drawReview(true), 30);
+  });
+  $('review').replaceChildren(el('p', { className: 'note warn' }, `要確認が ${result.issues.length.toLocaleString()} 件あります。一覧は「要確認」タブ（先頭1000件）で見られます。 `, b));
+}
+
+// ---- タブの中身 ----
+function drawPanel(id) {
+  const p = $(`panel-${id}`);
+  if (id === 'view') return;
+  if (id === 'schema') p.replaceChildren(schemaTable());
+  if (id === 'changes') p.replaceChildren(...changesView());
+  if (id === 'issues') p.replaceChildren(listTable(result.issues.slice(0, 1000), [['行', (x) => x.row + 1], ['列', (x) => x.column], ['値', (x) => fmt(x.value), 'v'], ['理由', (x) => x.reason], ['提案', (x) => fmt(x.suggestion), 'v']], '要確認はありません'));
+  if (id === 'clusters') p.replaceChildren(listTable(result.clusters, [['列', (x) => x.column], ['統一後', (x) => x.canonical, 'v'], ['まとめた表記', (x) => x.variants.map((v) => `${v.value}（${v.count}）`).join('、'), 'v'], ['確信度', (x) => x.confidence.toFixed(2)], ['状態', (x) => pill(x.applied)], ['行数', (x) => x.rows.length]], '表記ゆれはありません'));
+  if (id === 'meta') p.replaceChildren(el('pre', { className: 'json', textContent: JSON.stringify(result.meta, null, 2) }));
+  if (id === 'report') {
+    const frame = el('iframe', { title: '分析レポート' });
+    frame.setAttribute('sandbox', 'allow-scripts'); // レポートの中の操作（折りたたみなど）は動かし、このページには触れさせない
+    frame.srcdoc = result.toReport({ title: `${inputName} の分析レポート` });
+    p.replaceChildren(frame);
+  }
+  if (id === 'json') {
+    const limit = 200;
+    p.replaceChildren(
+      el('p', { className: 'muted', textContent: result.data.length > limit ? `先頭 ${limit} 行（全 ${result.data.length.toLocaleString()} 行は上の「JSON」で保存）` : `${result.data.length} 行` }),
+      el('pre', { className: 'json', textContent: JSON.stringify(result.data.slice(0, limit), null, 2) }),
+    );
+  }
+}
+
+function pill(applied) {
+  return el('span', { className: `pill ${applied ? 'ok' : 'warn'}`, textContent: applied ? '適用' : '提案' });
+}
+
+function schemaTable() {
+  const table = el('table', { className: 'list' });
+  table.append(el('thead', {}, el('tr', {}, ...['列名', '種類', '一致率', '列名のヒント', '値あり', '空', '種類の数', '候補'].map((t) => el('th', { textContent: t })))));
+  const body = el('tbody');
+  for (const c of result.schema) {
+    const ratio = el('div', { className: 'bar' }, el('i', { style: `width:${Math.round(c.confidence * 100)}%` }));
+    body.append(el('tr', {},
+      el('td', { textContent: c.name }),
+      el('td', {}, `${c.label}`, c.forced ? el('span', { className: 'muted', textContent: '（指定）' }) : null),
+      el('td', {}, el('div', { style: 'display:flex;gap:6px;align-items:center' }, ratio, `${Math.round(c.confidence * 100)}%`)),
+      el('td', { textContent: c.hinted ? 'あり' : '' }),
+      el('td', { textContent: c.nonEmpty.toLocaleString() }),
+      el('td', { textContent: c.empty.toLocaleString() }),
+      el('td', { textContent: c.unique.toLocaleString() }),
+      el('td', { className: 'muted', textContent: c.candidates.map((x) => `${x.label} ${Math.round(x.ratio * 100)}%`).join('、') }),
+    ));
+  }
+  table.append(body);
+  return el('div', { className: 'scroll' }, table);
+}
+
+let changeFilter = 'all';
+let changeColumn = '';
+function changesView() {
+  const filter = el('select');
+  filter.setAttribute('aria-label', '状態');
+  for (const [v, t] of [['all', 'すべて'], ['applied', '適用したもの'], ['pending', '提案（未適用）']]) filter.append(el('option', { value: v, textContent: t }));
+  filter.value = changeFilter;
+  const column = el('select');
+  column.setAttribute('aria-label', '列');
+  column.append(el('option', { value: '', textContent: 'すべての列' }), ...result.schema.map((c) => el('option', { value: c.name, textContent: c.name })));
+  column.value = changeColumn;
+  const redraw = () => {
+    changeFilter = filter.value;
+    changeColumn = column.value;
+    drawPanel('changes');
+  };
+  filter.addEventListener('change', redraw);
+  column.addEventListener('change', redraw);
+
+  const list = result.changes.filter((c) =>
+    (changeFilter === 'all' || (changeFilter === 'applied') === c.applied) && (!changeColumn || c.column === changeColumn));
+  const limit = 1000;
+  const toolbar = el('div', { className: 'toolbar' }, filter, column,
+    el('span', { className: 'muted', textContent: list.length > limit ? `${list.length.toLocaleString()} 件中 先頭 ${limit} 件` : `${list.length.toLocaleString()} 件` }));
+  const table = listTable(list.slice(0, limit), [
+    ['行', (x) => x.row + 1],
+    ['列', (x) => x.column],
+    ['変更前', (x) => fmt(x.before), 'v'],
+    ['変更後', (x) => fmt(x.after), 'v'],
+    ['規則', (x) => x.rule],
+    ['内容', (x) => x.note],
+    ['確信度', (x) => x.confidence.toFixed(2)],
+    ['状態', (x) => {
+      if (x.applied) return pill(true);
+      if (x.dismissed) return el('span', { className: 'muted', textContent: 'そのまま' });
+      const b = el('button', { type: 'button', textContent: '適用' });
+      b.style.cssText = 'font-size:12px;padding:1px 8px';
+      b.addEventListener('click', () => {
+        result.accept(x.row, x.column);
+        changed();
+      });
+      return b;
+    }],
+  ], '変更はありません');
+  return [toolbar, table];
+}
+
+function listTable(items, cols, emptyText) {
+  if (!items.length) return el('p', { className: 'empty', textContent: emptyText });
+  const table = el('table', { className: 'list' });
+  table.append(el('thead', {}, el('tr', {}, ...cols.map(([t]) => el('th', { textContent: t })))));
+  const body = el('tbody');
+  for (const item of items) {
+    body.append(el('tr', {}, ...cols.map(([, get, cls]) => {
+      const v = get(item);
+      const td = el('td', cls ? { className: cls } : {});
+      if (v instanceof Node) td.append(v);
+      else td.textContent = String(v ?? '');
+      return td;
+    })));
+  }
+  table.append(body);
+  return el('div', { className: 'scroll' }, table);
+}
+
+// ---- 性能の確認用データ：書き方の揺れた顧客データ ----
+function generate(n) {
+  // 毎回同じデータになる疑似乱数（mulberry32）
+  let seed = 42;
+  const rand = (k) => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4294967296) * k);
+  };
+  const z = (s) => s.replace(/[0-9]/g, (d) => String.fromCharCode(d.charCodeAt(0) + 0xfee0)); // 全角数字
+  const companies = ['株式会社ABC', '(株)ABC', '株式会社ＡＢＣ', '有限会社さくら商店', '(有)さくら商店', 'ミドリ工業株式会社', 'ﾐﾄﾞﾘ工業株式会社'];
+  const cities = ['東京都千代田区千代田', '大阪府大阪市北区梅田', '神奈川県横浜市中区山下町', '愛知県名古屋市中区三の丸'];
+  const lines = ['顧客ID,会社名,電話,郵便番号,登録日,金額,会員,住所'];
+  for (let i = 0; i < n; i++) {
+    const tel = `0${rand(9) + 1}-${1000 + rand(9000)}-${1000 + rand(9000)}`;
+    const phone = [tel, z(tel), tel.replace(/-/g, ''), `${tel.slice(0, 2)}(${tel.slice(3, 7)})${tel.slice(8)}`][rand(4)];
+    const zip = `${100 + rand(900)}-${String(rand(10000)).padStart(4, '0')}`;
+    const postal = [zip, `〒${zip}`, z(zip), `〒${zip.replace('-', 'ー')}`][rand(4)];
+    const y = 2000 + rand(25), m = 1 + rand(12), d = 1 + rand(28);
+    const date = [`${y}/${m}/${d}`, `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`, `${y >= 2019 ? `令和${y - 2018}` : `平成${y - 1988}`}年${m}月${d}日`, `${y}年${m}月${d}日`][rand(4)];
+    const amount = 100 * (1 + rand(5000));
+    const money = [`"¥${amount.toLocaleString()}"`, `${amount}円`, String(amount), `"${amount.toLocaleString()}"`][rand(4)];
+    const member = ['○', '×', 'はい', 'いいえ'][rand(4)];
+    const addr = `${cities[rand(4)]}${1 + rand(5)}丁目${1 + rand(20)}番${1 + rand(30)}号`;
+    lines.push([`C${String(i + 1).padStart(6, '0')}`, companies[rand(companies.length)], phone, postal, date, money, member, addr].join(','));
+  }
+  return lines.join('\n');
+}
+</script>
+</body>
+</html>

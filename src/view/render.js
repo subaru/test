@@ -17,7 +17,7 @@ function rowHTML(schema, r, i, widths) {
   const cells = schema.map((c, k) => {
     const raw = format(r[c.name], c.type);
     const text = escape(raw);
-    const cut = widths && raw && estimateEm(raw) > widths[k] - 1.2;
+    const cut = widths && raw && estimateEm(raw) > widths[k] - 2;
     return `<td class="t-${escape(c.type)}"${cut ? ` title="${text}"` : ''}>${text}</td>`;
   });
   return `<tr${widths ? ` aria-rowindex="${i + 2}"` : ''}>${cells.join('')}</tr>`;
@@ -65,16 +65,16 @@ const displayWidth = (s) => {
 };
 
 // 仮想スクロールでは、見えている行が変わっても列の幅が動かないよう、先に幅を決めておく。
-// 見出しと先頭の行（最大500行）の文字数から、全角1文字＝1em として見積もる
+// 見出しと先頭の行（最大500行）の文字数から、半角1文字＝0.6em・全角1文字＝1.2em として見積もる
 function columnWidths(schema, rows) {
   const sample = rows.slice(0, 500);
   return schema.map((c) => {
     let w = displayWidth(c.name) + 2; // 並べ替えの印の分
     for (const r of sample) w = Math.max(w, displayWidth(format(r[c.name], c.type)));
-    return Math.min(28, Math.max(4, w * 0.55 + 1.6));
+    return Math.min(28, Math.max(4, w * 0.6 + 2));
   });
 }
-const estimateEm = (s) => displayWidth(s) * 0.55;
+const estimateEm = (s) => displayWidth(s) * 0.6;
 
 export const STYLE = `
 .tidy-view { font: 14px/1.5 system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; }
